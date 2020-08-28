@@ -6,30 +6,33 @@ Created on Thu Aug  6 15:43:43 2020
 @author: Tristan
 """
 
+import math
+import itertools
+
 courierData = {} # x y ontime offtime
-orderData = {} # x y placementtime restaurant readytime
+orderData = {} # x y placementtime restaurant readytime latestLeavingTime
 restaurantData = {} # x y
 
-grubhubInstance = '0o50t75s1p100'
+grubhubInstance = '0r50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 
 with open(fileDirectory + 'couriers.txt') as courierDataFile:
     for line in courierDataFile:
         if not line.startswith('courier'):
             data = line.split('\t')
-            courierData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][:-2])]
+            courierData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][:-1])]
 
 with open(fileDirectory + 'orders.txt') as orderDataFile:
     for line in orderDataFile:
         if not line.startswith('order'):
             data = line.split('\t')
-            orderData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][1:]), int(data[5][:-2])]
+            orderData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][1:]), int(data[5][:-1])]
 
 with open(fileDirectory + 'restaurants.txt') as restaurantDataFile:
     for line in restaurantDataFile:
         if not line.startswith('restaurant'):
             data = line.split('\t')
-            restaurantData[int(data[0][1:])] = [int(data[1]), int(data[2][:-2])]
+            restaurantData[int(data[0][1:])] = [int(data[1]), int(data[2][:-1])]
 
 with open(fileDirectory + 'instance_parameters.txt') as instanceParameters:
     instanceParameters.readline().strip()
@@ -46,9 +49,64 @@ ordersAtRestaurant = {restaurant: [] for restaurant in restaurantData}
 for order in orderData:
     ordersAtRestaurant[orderData[order][3]].append(order)
 
-maxSizeBundles = []
+for order in orderData:
+    data = orderData[order]
+    restaurant = data[3]
+    destX = data[0]
+    destY = data[1]
+    restX = restaurantData[restaurant][0]
+    restY = restaurantData[restaurant][1]
+    travelTime = math.sqrt((destX - restX)**2 + (destY - restY)**2) / travelSpeed
+    latestLeavingTime = data[2] + maxClickToDoor - travelTime - (pickupServiceTime + dropoffServiceTime) / 2
+    orderData[order].append(latestLeavingTime)
+
+maxSizeBundles = {}
 for restaurant in ordersAtRestaurant:
     orderList = ordersAtRestaurant[restaurant]
-    for i in len(orderList):
-        order = orderList[i]
-        print()
+    for order in orderList:
+        maxSizeBundles[order] = []
+        orderReadyTime = orderData[order][4]
+        latestLeavingTime = orderData[order][5]
+        for additionalOrder in orderList:
+            additionalOrderReadyTime = orderData[additionalOrder][4]
+            if additionalOrderReadyTime > orderReadyTime and additionalOrderReadyTime < latestLeavingTime:
+                maxSizeBundles[order].append(additionalOrder)
+
+bundleList = {}
+for order in maxSizeBundles:
+    maxPotentialAdditionalOrders = maxSizeBundles[order]
+    if len(maxPotentialAdditionalOrders) > 0:
+        for i in range(1, len(maxPotentialAdditionalOrders) + 1):
+            for bundleCombination in itertools.combinations(maxPotentialAdditionalOrders, i):
+                potentialBundle = list(bundleCombination) + [order]
+                earliestLatestLeavingTime = min(orderData[number][5] for number in potentialBundle)
+                latestOrderReadyTime = max(orderData[number][4] for number in potentialBundle)
+                if latestOrderReadyTime < earliestLatestLeavingTime:
+                    restaurant = orderData[order][3]
+                    earliestLeavingTime = latestOrderReadyTime
+                    latestLeavingTime = earliestLatestLeavingTime
+                    bundleList[tuple(potentialBundle)] = [restaurant, earliestLeavingTime, latestLeavingTime]
+    data = orderData[order]
+    bundleList[(order,)] = [data[3], data[4], data[5]]
+
+bundlesAtRestaurant = {restaurant: [] for restaurant in restaurantData}
+for bundle in bundleList:
+    bundlesAtRestaurant[bundleList[bundle][0]].append(bundle)
+
+variables = []
+count = 0
+for courier in courierData:
+    print('courier number ' + str(courier))
+    for bundle in bundleList:
+        for nextRestaurant in restaurantData:
+            if courierData[courier][2] < bundleList[bundle][2]: # on time before latest leaving time
+                if courierData[courier][3] > bundleList[bundle][1]: # off time after earliest leaving time
+                    count += 1
+                    for nextBundle in bundlesAtRestaurant[nextRestaurant]:
+                        if courierData[courier][3] > bundleList[nextBundle][1]:
+                            variables.append((courier, bundle, nextRestaurant))
+                            break
+    print(str(len(variables)) + ' variables so far')
+    
+
+print(len(orderData), len(bundleList), len(list(bundle for bundle in bundleList if len(bundle) < 3)), len(restaurantData), len(courierData), len(variables))
