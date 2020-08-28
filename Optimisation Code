@@ -8,12 +8,13 @@ Created on Thu Aug  6 15:43:43 2020
 
 import math
 import itertools
+from collections import defaultdict
 
 courierData = {} # courierNumber: [x, y, ontime, offtime]
 orderData = {} # orderNumber: [x, y, placementtime, restaurant, readytime, latestLeavingTime, latestDeliveryTime]
 restaurantData = {} # restaurantNumber: [x, y]
 
-grubhubInstance = '0o100t75s2p100'
+grubhubInstance = '0r50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 
 with open(fileDirectory + 'couriers.txt') as courierDataFile:
@@ -203,10 +204,10 @@ def AddOrderToBundles(restaurant, oldLength):
     newLengthBundles = {}
     # bundle: (orderSet, earliestLeavingTime, latestLeavingTime, totalTravelTime)
     for bundle in shorterLengthBundles:
+        oldEarliestLeavingTime = shorterLengthBundles[bundle][1]
+        oldLatestLeavingTime = shorterLengthBundles[bundle][2]
+        oldTravelTime = shorterLengthBundles[bundle][3]
         for order in ordersAtRestaurant[restaurant]:
-            oldEarliestLeavingTime = shorterLengthBundles[bundle][1]
-            oldLatestLeavingTime = shorterLengthBundles[bundle][2]
-            oldTravelTime = shorterLengthBundles[bundle][3]
             if order not in bundle:
                 newBundle = bundle + (order,)
                 newEarliestLeavingTime = max(oldEarliestLeavingTime, orderData[order][4])
@@ -221,23 +222,22 @@ def AddOrderToBundles(restaurant, oldLength):
 
 def RemoveDominatedBundles(dictionaryOfBundles):
     groupedBundles = {}
-    # (orderSet, lastOrder) = [bundle]
+    # (orderSet, lastOrder) = [bundle1, bundle2, bundle3, ...]
     for bundle in dictionaryOfBundles:
         orderSet = dictionaryOfBundles[bundle][0]
         lastOrder = bundle[-1]
+        
+        # replace next two lines, when define, use defaultdict
         if (orderSet, lastOrder) not in groupedBundles:
             groupedBundles[(orderSet, lastOrder)] = []
         groupedBundles[(orderSet, lastOrder)].append(bundle)
     for grouping in groupedBundles:
         dominatedBundles = set()
-        for i in range(len(groupedBundles[grouping])-1):
-            for j in range(i+1,len(groupedBundles[grouping])):
-                bundle1 = groupedBundles[grouping][i]
-                bundle2 = groupedBundles[grouping][j]
-                if dictionaryOfBundles[bundle1][2] < dictionaryOfBundles[bundle2][2] and dictionaryOfBundles[bundle1][3] > dictionaryOfBundles[bundle2][3]:
-                    dominatedBundles.add(bundle1)
-                elif dictionaryOfBundles[bundle1][2] > dictionaryOfBundles[bundle2][2] and dictionaryOfBundles[bundle1][3] < dictionaryOfBundles[bundle2][3]:
-                    dominatedBundles.add(bundle2)
+        for (bundle1, bundle2) in itertools.combinations(groupedBundles[grouping],2):
+            if dictionaryOfBundles[bundle1][2] < dictionaryOfBundles[bundle2][2] and dictionaryOfBundles[bundle1][3] > dictionaryOfBundles[bundle2][3]:
+                dominatedBundles.add(bundle1)
+            elif dictionaryOfBundles[bundle1][2] > dictionaryOfBundles[bundle2][2] and dictionaryOfBundles[bundle1][3] < dictionaryOfBundles[bundle2][3]:
+                dominatedBundles.add(bundle2)
         for bundle in dominatedBundles:
             del(dictionaryOfBundles[bundle])
     return dictionaryOfBundles
