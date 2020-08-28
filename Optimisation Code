@@ -9,13 +9,15 @@ Created on Thu Aug  6 15:43:43 2020
 import math
 from collections import defaultdict
 import itertools
+from time import time
 
 courierData = {} # x y ontime offtime
 orderData = {} # x y placementtime restaurant readytime latestLeavingTime maxClickToDoorArrivalTime
 restaurantData = {} # x y
 
-grubhubInstance = '0o100t75s2p100'
+grubhubInstance = '0r50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
+programStartTime = time()
 
 with open(fileDirectory + 'couriers.txt') as courierDataFile:
     for line in courierDataFile:
@@ -49,6 +51,10 @@ with open(fileDirectory + 'instance_parameters.txt') as instanceParameters:
 ordersAtRestaurant = {restaurant: [] for restaurant in restaurantData}
 for order in orderData:
     ordersAtRestaurant[orderData[order][3]].append(order)
+
+couriersByOffTime = defaultdict(list)
+for courier in courierData:
+    couriersByOffTime[courierData[courier][3]].append(courier)
 
 def TravelTime(loc1, loc2):
     x1, y1 = loc1[0], loc1[1]
@@ -103,7 +109,7 @@ for restaurant in restaurantData:
         calculatedSequences = newSequences
         for sequence in calculatedSequences:
             orderDeliverySequences[sequence] = calculatedSequences[sequence]
-print(str(len(orderDeliverySequences)) + ' delivery sequences')
+print(str(len(orderDeliverySequences)) + ' delivery sequences ' + str(time() - programStartTime))
 
 sequenceNextRestaurantPairs = {}
 # (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
@@ -116,7 +122,7 @@ for sequence in orderDeliverySequences:
                 travelTime = orderDeliverySequences[sequence][3] + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
                 sequenceNextRestaurantPairs[(sequence, restaurant)] = orderDeliverySequences[sequence][:3] + [travelTime]
                 break
-print(str(len(sequenceNextRestaurantPairs)) + ' pre-domination pairs')
+print(str(len(sequenceNextRestaurantPairs)) + ' pre-domination pairs ' + str(time() - programStartTime))
 
 groupedPairs = defaultdict(list)
 for pair in sequenceNextRestaurantPairs:
@@ -130,24 +136,43 @@ for pair in groupedPairs:
             dominatedSequences.add(sequence1)
     for sequence in dominatedSequences:
         del sequenceNextRestaurantPairs[(sequence, pair[1])]
-print(str(len(sequenceNextRestaurantPairs)) + ' post-domination pairs')
+print(str(len(sequenceNextRestaurantPairs)) + ' post-domination pairs ' + str(time() - programStartTime))
 
-variables = set()
+variables = set() # {(offTime1, sequence1, nextRestaurant1), (offTime2, sequence2, nextRestaurant2), ...}
+# Main variables
 for pair in sequenceNextRestaurantPairs:
-    leavingRestaurant = sequenceNextRestaurantPairs[pair][0]
-    earliestLeavingTime = sequenceNextRestaurantPairs[pair][1]
-    latestLeavingTime = sequenceNextRestaurantPairs[pair][2]
-    totalTravelTime = sequenceNextRestaurantPairs[pair][3]
+    leavingRestaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime = sequenceNextRestaurantPairs[pair]
     earliestArrivalTime = earliestLeavingTime + totalTravelTime
-    for courier in courierData:
-        if earliestArrivalTime > courierData[courier][3]:
-            continue
-        commute = TravelTime(courierData[courier], restaurantData[leavingRestaurant])
-        if courierData[courier][2] + commute + pickupServiceTime / 2 < latestLeavingTime:
-            if courierData[courier][3] > earliestLeavingTime:
-                for order in ordersAtRestaurant[pair[1]]:
-                    if orderData[order][4] < courierData[courier][3] and orderData[order][5] > earliestArrivalTime:
-                        variables.add((courierData[courier][3],) + pair)
+    for offTime in couriersByOffTime:
+        if offTime > earliestLeavingTime:
+            variableForOffTime = False
+            for courier in couriersByOffTime[offTime]:
+                if earliestArrivalTime > courierData[courier][3]: # check that the courier is still in-shift when arriving at next restaurant
+                    continue
+                commute = TravelTime(courierData[courier], restaurantData[leavingRestaurant])
+                if courierData[courier][2] + commute + pickupServiceTime / 2 < latestLeavingTime:
+                    if courierData[courier][3] > earliestLeavingTime:
+                        for order in ordersAtRestaurant[pair[1]]:
+                            if orderData[order][4] < courierData[courier][3] and orderData[order][5] > earliestArrivalTime:
+                                variables.add((offTime,) + pair)
+                                variableForOffTime = True
+                                break
+                if variableForOffTime:
+                    break
+print(str(len(variables)) + ' main variables ' + str(time() - programStartTime))
+# Exit variables
+# Create sequence-courier (off time) pairs, with nextRestaurant = 0
+for sequence in orderDeliverySequences:
+    restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime = orderDeliverySequences[sequence]
+    for offTime in couriersByOffTime:
+        # off time after earliest ready time
+        if offTime > earliestLeavingTime:
+            # check that there is a courier that is on for this sequence
+            # courier must be able to get to restaurant before latest leaving time
+            for courier in couriersByOffTime[offTime]:
+                if courierData[courier][2] < latestLeavingTime: # added for hopefully a small speed-up?
+                    if courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 < latestLeavingTime:
+                        variables.add((offTime, sequence, 0))
                         break
 # TODO: Add entry and exit variables
-print(str(len(variables)) + ' total variables')
+print(str(len(variables)) + ' main + exit variables ' + str(time() - programStartTime))
