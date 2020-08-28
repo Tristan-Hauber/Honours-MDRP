@@ -13,7 +13,7 @@ courierData = {} # courierNumber: [x, y, ontime, offtime]
 orderData = {} # orderNumber: [x, y, placementtime, restaurant, readytime, latestLeavingTime, latestDeliveryTime]
 restaurantData = {} # restaurantNumber: [x, y]
 
-grubhubInstance = '0r50t100s1p125'
+grubhubInstance = '0o100t75s2p100'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 
 with open(fileDirectory + 'couriers.txt') as courierDataFile:
@@ -198,50 +198,115 @@ for order in orderData:
 # print('bundles (with 2 or less orders): ' + str(len(refinedBundleList)) + ' (' + str(len(list(bundle for bundle in refinedBundleList if len(bundle) <= 2))) + ')')
 # print('variables (with 2 or less orders): ' + str(len(variables)) + ' (' + str(len(list(variable for variable in variables if len(variable[1]) <= 2))) + ')')
 
-sequencedBundleListByLengthAndRestaurant = {}
+def AddOrderToBundles(restaurant, oldLength):
+    shorterLengthBundles = sequencedBundleList[(restaurant, oldLength)]
+    newLengthBundles = {}
+    # bundle: (orderSet, earliestLeavingTime, latestLeavingTime, totalTravelTime)
+    for bundle in shorterLengthBundles:
+        for order in ordersAtRestaurant[restaurant]:
+            oldEarliestLeavingTime = shorterLengthBundles[bundle][1]
+            oldLatestLeavingTime = shorterLengthBundles[bundle][2]
+            oldTravelTime = shorterLengthBundles[bundle][3]
+            if order not in bundle:
+                newBundle = bundle + (order,)
+                newEarliestLeavingTime = max(oldEarliestLeavingTime, orderData[order][4])
+                newTravelTime = oldTravelTime + dropoffServiceTime + TravelTime(orderData[bundle[-1]], orderData[order])
+                newLatestLeavingTime = min(oldLatestLeavingTime, orderData[order][6] - newTravelTime)
+                if newLatestLeavingTime < newEarliestLeavingTime:
+                    break
+                newLengthBundles[newBundle] = (frozenset(newBundle), newEarliestLeavingTime, newLatestLeavingTime, newTravelTime)
+    if oldLength + 1 >= 3:
+        newLengthBundles = RemoveDominatedBundles(newLengthBundles)
+    return newLengthBundles
+
+def RemoveDominatedBundles(dictionaryOfBundles):
+    groupedBundles = {}
+    # (orderSet, lastOrder) = [bundle]
+    for bundle in dictionaryOfBundles:
+        orderSet = dictionaryOfBundles[bundle][0]
+        lastOrder = bundle[-1]
+        if (orderSet, lastOrder) not in groupedBundles:
+            groupedBundles[(orderSet, lastOrder)] = []
+        groupedBundles[(orderSet, lastOrder)].append(bundle)
+    for grouping in groupedBundles:
+        dominatedBundles = set()
+        for i in range(len(groupedBundles[grouping])-1):
+            for j in range(i+1,len(groupedBundles[grouping])):
+                bundle1 = groupedBundles[grouping][i]
+                bundle2 = groupedBundles[grouping][j]
+                if dictionaryOfBundles[bundle1][2] < dictionaryOfBundles[bundle2][2] and dictionaryOfBundles[bundle1][3] > dictionaryOfBundles[bundle2][3]:
+                    dominatedBundles.add(bundle1)
+                elif dictionaryOfBundles[bundle1][2] > dictionaryOfBundles[bundle2][2] and dictionaryOfBundles[bundle1][3] < dictionaryOfBundles[bundle2][3]:
+                    dominatedBundles.add(bundle2)
+        for bundle in dominatedBundles:
+            del(dictionaryOfBundles[bundle])
+    return dictionaryOfBundles
+
+sequencedBundleList = {}
 # (restaurant, lengthOfBundle): {orderSequence: (orderSet, earliestLeavingTime, latestLeavingTime, totalTravelTime)}
 for restaurant in restaurantData:
     bundlesOfCurrentLength = {}
     lengthOfBundles = 1
-    print('length: ' + str(lengthOfBundles))
-    for order in ordersAtRestaurant:
+    
+    for order in ordersAtRestaurant[restaurant]:
         bundlesOfCurrentLength[(order,)] = (frozenset((order,)), orderData[order][4], orderData[order][5], TravelTime(restaurantData[restaurant], orderData[order]) + (pickupServiceTime + dropoffServiceTime) / 2)
+    sequencedBundleList[(restaurant, 1)] = bundlesOfCurrentLength
+    
     while len(bundlesOfCurrentLength) > 0:
-        sequencedBundleListByLengthAndRestaurant[(restaurant, lengthOfBundles)] = bundlesOfCurrentLength
-        print('number of bundles: ' + str(len(bundlesOfCurrentLength)))
-        bundlesOfCurrentLength = {}
+        bundlesOfCurrentLength = AddOrderToBundles(restaurant, lengthOfBundles)
         lengthOfBundles += 1
-        print('length: ' + str(lengthOfBundles))
-        for orderSequence in sequencedBundleListByLengthAndRestaurant[(restaurant, lengthOfBundles-1)]:
-            data = sequencedBundleListByLengthAndRestaurant[(restaurant, lengthOfBundles-1)][orderSequence]
-            for order in ordersAtRestaurant:
-                if order not in orderSequence:
-                    newSequence = orderSequence + (order,)
-                    orderSet = frozenset(newSequence)
-                    earliestLeavingTime = max(data[1], orderData[order][4])
-                    if earliestLeavingTime < data[2]:
-                        travelTime = dropoffServiceTime + TravelTime(orderData[orderSequence[-1]], orderData[order])
-                        totalTravelTime = data[3] + travelTime
-                        if earliestLeavingTime + totalTravelTime < orderData[order][6]:
-                            latestLeavingTime = orderData[order][6] - totalTravelTime
-                            bundlesOfCurrentLength[newSequence] = (orderSet, earliestLeavingTime, latestLeavingTime, totalTravelTime)
-        if lengthOfBundles >= 3:
-            bundleComparisonDictionary = {}
-            bundlesToCut = []
-            for orderSequence in bundlesOfCurrentLength:
-                if (bundlesOfCurrentLength[orderSequence][0], orderSequence[-1]) not in bundleComparisonDictionary:
-                    bundleComparisonDictionary[(bundlesOfCurrentLength[orderSequence][0], orderSequence[-1])] = []
-                bundleComparisonDictionary[(bundlesOfCurrentLength[orderSequence][0], orderSequence[-1])].append(orderSequence)
-            for (i,j) in bundleComparisonDictionary:
-                for orderSequence in bundleComparisonDictionary[(i,j)]:
-                    for secondSequence in bundleComparisonDictionary[(i,j)]:
-                        if orderSequence != secondSequence:
-                            if bundlesOfCurrentLength[orderSequence][2] > bundlesOfCurrentLength[secondSequence][2]:
-                                if bundlesOfCurrentLength[orderSequence][3] < bundlesOfCurrentLength[secondSequence][3]:
-                                    bundlesToCut.append(secondSequence)
-                            if bundlesOfCurrentLength[orderSequence][2] < bundlesOfCurrentLength[secondSequence][2]:
-                                if bundlesOfCurrentLength[orderSequence][3] > bundlesOfCurrentLength[secondSequence][3]:
-                                    bundlesToCut.append(orderSequence)
-            print('cut bundles: ' + str(len(bundlesToCut)))
-            for bundle in set(bundlesToCut):
-                bundlesOfCurrentLength.pop(bundle)
+        if len(bundlesOfCurrentLength) > 0:
+            sequencedBundleList[(restaurant, lengthOfBundles)] = bundlesOfCurrentLength
+
+bundleNextRestaurantPairs = {}
+# (bundle, nextRestaurant): (orderSet, earliestLeavingTime, latestLeavingTime, totalTravelTime)
+for grouping in sequencedBundleList:
+    for orderSequence in sequencedBundleList[grouping]:
+        travelTime = sequencedBundleList[grouping][orderSequence][3]
+        for restaurant in restaurantData:
+            totalTravelTime = travelTime + TravelTime(orderData[orderSequence[-1]], restaurantData[restaurant]) + (pickupServiceTime + dropoffServiceTime) / 2
+            for order in ordersAtRestaurant[restaurant]:
+                if orderData[order][5] > sequencedBundleList[grouping][orderSequence][2] + totalTravelTime:
+                    bundleNextRestaurantPairs[(orderSequence, restaurant)] = (sequencedBundleList[grouping][orderSequence][:3]) + (totalTravelTime,)
+                    break
+
+groupedOrderRestaurantPairs = {}
+# (orderSet, nextRestaurant) = [orderSequence]
+for pair in bundleNextRestaurantPairs:
+    if (bundleNextRestaurantPairs[pair][0], pair[1]) not in groupedOrderRestaurantPairs:
+        groupedOrderRestaurantPairs[bundleNextRestaurantPairs[pair][0], pair[1]] = []
+    groupedOrderRestaurantPairs[bundleNextRestaurantPairs[pair][0], pair[1]].append(pair[0])
+
+for grouping in groupedOrderRestaurantPairs:
+    dominatedPairs = set()
+    for i in range(len(groupedOrderRestaurantPairs[grouping])-1):
+        for j in range(i+1,len(groupedOrderRestaurantPairs[grouping])):
+            orderSequence1 = groupedOrderRestaurantPairs[grouping][i]
+            orderSequence2 = groupedOrderRestaurantPairs[grouping][j]
+            if bundleNextRestaurantPairs[(orderSequence1, grouping[1])][2] > bundleNextRestaurantPairs[(orderSequence2, grouping[1])][2]:
+                if bundleNextRestaurantPairs[(orderSequence1, grouping[1])][3] < bundleNextRestaurantPairs[(orderSequence2, grouping[1])][3]:
+                    dominatedPairs.add((orderSequence2, grouping[1]))
+            if bundleNextRestaurantPairs[(orderSequence1, grouping[1])][2] < bundleNextRestaurantPairs[(orderSequence2, grouping[1])][2]:
+                if bundleNextRestaurantPairs[(orderSequence1, grouping[1])][3] > bundleNextRestaurantPairs[(orderSequence2, grouping[1])][3]:
+                    dominatedPairs.add((orderSequence1, grouping[1]))
+    for pair in dominatedPairs:
+        groupedOrderRestaurantPairs[grouping].remove(pair[0])
+        del(bundleNextRestaurantPairs[pair])
+
+variables = []
+# [(courier1, orderSequence1, nextRestaurant1), (courier2, orderSequence2, nextRestaurant2), ...]
+for pair in bundleNextRestaurantPairs:
+    firstRestaurant = orderData[pair[0][0]][3]
+    nextRestaurant = pair[1]
+    earliestLeavingTime = bundleNextRestaurantPairs[pair][1]
+    latestLeavingTime = bundleNextRestaurantPairs[pair][2]
+    totalTravelTime = bundleNextRestaurantPairs[pair][3]
+    for courier in courierData:
+        overheadTravel = TravelTime(courierData[courier], restaurantData[restaurant])
+        if courierData[courier][2] + overheadTravel < latestLeavingTime:
+            if courierData[courier][3] > earliestLeavingTime:
+                for order in ordersAtRestaurant[nextRestaurant]:
+                    if orderData[order][4] < courierData[courier][3]:
+                        if orderData[order][5] > earliestLeavingTime + totalTravelTime:
+                            variables.append((courier, pair[0], pair[1]))
+                            break
