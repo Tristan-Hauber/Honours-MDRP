@@ -9,9 +9,9 @@ Created on Thu Aug  6 15:43:43 2020
 import math
 import itertools
 
-courierData = {} # x y ontime offtime
-orderData = {} # x y placementtime restaurant readytime latestLeavingTime
-restaurantData = {} # x y
+courierData = {} # courierNumber: [x, y, ontime, offtime]
+orderData = {} # orderNumber: [x, y, placementtime, restaurant, readytime, latestLeavingTime, latestDeliveryTime]
+restaurantData = {} # restaurantNumber: [x, y]
 
 grubhubInstance = '0r50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
@@ -46,67 +46,202 @@ with open(fileDirectory + 'instance_parameters.txt') as instanceParameters:
     minPayPerHour = int(parameters[6]) # dollars
 
 ordersAtRestaurant = {restaurant: [] for restaurant in restaurantData}
+# restaurant: [order0, order1, order2, ...]
 for order in orderData:
     ordersAtRestaurant[orderData[order][3]].append(order)
 
+def TravelTime(l1,l2):
+    x1,y1 = l1[0],l1[1]
+    x2,y2 = l2[0],l2[1]
+    return math.sqrt((x1-x2)**2 + (y1-y2)**2) / travelSpeed
+
 for order in orderData:
     data = orderData[order]
-    restaurant = data[3]
-    destX = data[0]
-    destY = data[1]
-    restX = restaurantData[restaurant][0]
-    restY = restaurantData[restaurant][1]
-    travelTime = math.sqrt((destX - restX)**2 + (destY - restY)**2) / travelSpeed
-    latestLeavingTime = data[2] + maxClickToDoor - travelTime - (pickupServiceTime + dropoffServiceTime) / 2
+    restaurant = orderData[order][3]
+    latestDeliveryTime = data[2] + maxClickToDoor
+    latestLeavingTime = latestDeliveryTime - TravelTime(restaurantData[restaurant], orderData[order]) - (pickupServiceTime + dropoffServiceTime) / 2
     orderData[order].append(latestLeavingTime)
+    orderData[order].append(latestDeliveryTime)
 
-maxSizeBundles = {}
-for restaurant in ordersAtRestaurant:
-    orderList = ordersAtRestaurant[restaurant]
-    for order in orderList:
-        maxSizeBundles[order] = []
-        orderReadyTime = orderData[order][4]
-        latestLeavingTime = orderData[order][5]
-        for additionalOrder in orderList:
-            additionalOrderReadyTime = orderData[additionalOrder][4]
-            if additionalOrderReadyTime > orderReadyTime and additionalOrderReadyTime < latestLeavingTime:
-                maxSizeBundles[order].append(additionalOrder)
+# maxSizeBundles = {}
+# # firstOrder: [additionalOrder0, additionalOrder1, additionalOrder2, ...]
+# for restaurant in ordersAtRestaurant:
+#     orderList = ordersAtRestaurant[restaurant]
+#     for order in orderList:
+#         maxSizeBundles[order] = []
+#         orderReadyTime = orderData[order][4]
+#         latestLeavingTime = orderData[order][5]
+#         for additionalOrder in orderList:
+#             additionalOrderReadyTime = orderData[additionalOrder][4]
+#             if additionalOrderReadyTime > orderReadyTime and additionalOrderReadyTime < latestLeavingTime:
+#                 maxSizeBundles[order].append(additionalOrder)
 
-bundleList = {}
-for order in maxSizeBundles:
-    maxPotentialAdditionalOrders = maxSizeBundles[order]
-    if len(maxPotentialAdditionalOrders) > 0:
-        for i in range(1, len(maxPotentialAdditionalOrders) + 1):
-            for bundleCombination in itertools.combinations(maxPotentialAdditionalOrders, i):
-                potentialBundle = list(bundleCombination) + [order]
-                earliestLatestLeavingTime = min(orderData[number][5] for number in potentialBundle)
-                latestOrderReadyTime = max(orderData[number][4] for number in potentialBundle)
-                if latestOrderReadyTime < earliestLatestLeavingTime:
-                    restaurant = orderData[order][3]
-                    earliestLeavingTime = latestOrderReadyTime
-                    latestLeavingTime = earliestLatestLeavingTime
-                    bundleList[tuple(potentialBundle)] = [restaurant, earliestLeavingTime, latestLeavingTime]
-    data = orderData[order]
-    bundleList[(order,)] = [data[3], data[4], data[5]]
+# bundleList = {}
+# # tupleOfOrders: [placementRestaurant, earliestLeavingTime, latestLeavingTime]
+# for order in maxSizeBundles:
+#     maxPotentialAdditionalOrders = maxSizeBundles[order]
+#     if len(maxPotentialAdditionalOrders) > 0:
+#         for i in range(1, len(maxPotentialAdditionalOrders) + 1):
+#             for bundleCombination in itertools.combinations(maxPotentialAdditionalOrders, i):
+#                 potentialBundle = list(bundleCombination) + [order]
+#                 earliestLatestLeavingTime = min(orderData[number][5] for number in potentialBundle)
+#                 latestOrderReadyTime = max(orderData[number][4] for number in potentialBundle)
+#                 if latestOrderReadyTime < earliestLatestLeavingTime:
+#                     restaurant = orderData[order][3]
+#                     earliestLeavingTime = latestOrderReadyTime
+#                     latestLeavingTime = earliestLatestLeavingTime
+#                     bundleList[tuple(potentialBundle)] = [restaurant, earliestLeavingTime, latestLeavingTime]
+#     data = orderData[order]
+#     bundleList[(order,)] = [data[3], data[4], data[5]]
 
-bundlesAtRestaurant = {restaurant: [] for restaurant in restaurantData}
-for bundle in bundleList:
-    bundlesAtRestaurant[bundleList[bundle][0]].append(bundle)
-
-variables = []
-count = 0
-for courier in courierData:
-    print('courier number ' + str(courier))
-    for bundle in bundleList:
-        for nextRestaurant in restaurantData:
-            if courierData[courier][2] < bundleList[bundle][2]: # on time before latest leaving time
-                if courierData[courier][3] > bundleList[bundle][1]: # off time after earliest leaving time
-                    count += 1
-                    for nextBundle in bundlesAtRestaurant[nextRestaurant]:
-                        if courierData[courier][3] > bundleList[nextBundle][1]:
-                            variables.append((courier, bundle, nextRestaurant))
-                            break
-    print(str(len(variables)) + ' variables so far')
+# refinedBundleList = {}
+# # tupleOfOrders: [placementRestaurant, earliestLeavingTime, latestLeavingTime]
+# rejectedOrderSequences = []
+# for bundle in bundleList:
+#     validBundle = False
+#     for orderSequence in itertools.permutations(bundle):
+#         validSequence = True
+#         for rejectedSequence in rejectedOrderSequences:
+#             if rejectedSequence in ' '.join(map(str, orderSequence)):
+#                 validSequence = False
+#                 break
+#         if not validSequence:
+#             break
+#         sequenceExamined = []
+#         journeyCurrentTime = bundleList[bundle][1]
+#         currentLocX = restaurantData[bundleList[bundle][0]][0]
+#         currentLocY = restaurantData[bundleList[bundle][0]][1]
+#         journeyCurrentTime += pickupServiceTime / 2
+#         for order in orderSequence:
+#             sequenceExamined.append(order)
+#             travelTime = math.sqrt((currentLocX-orderData[order][0])**2 + (currentLocY - orderData[order][1])**2) / travelSpeed
+#             journeyCurrentTime += travelTime + dropoffServiceTime / 2
+#             if journeyCurrentTime >= orderData[order][6]:
+#                 validSequence = False
+#                 rejectedOrderSequences.append(' '.join(map(str, sequenceExamined)))
+#                 break
+#             journeyCurrentTime += dropoffServiceTime / 2
+#             currentLocX = orderData[order][0]
+#             currentLocY = orderData[order][1]
+#         if validSequence:
+#             validBundle = True
+#             break
+#     if validBundle: refinedBundleList[bundle] = bundleList[bundle]    
     
+# bundlesAtRestaurant = {restaurant: [] for restaurant in restaurantData}
+# for bundle in refinedBundleList:
+#     bundlesAtRestaurant[refinedBundleList[bundle][0]].append(bundle)
 
-print(len(orderData), len(bundleList), len(list(bundle for bundle in bundleList if len(bundle) < 3)), len(restaurantData), len(courierData), len(variables))
+# # orderSequenceNextRestaurantPairs = {}
+# # # (orderSequence, nextRestaurant): [pickupRestaurant, earliestPickupTime, latestLeavingTime, totalTravelTime]
+# # for bundle in refinedBundleList:
+# #     for restaurant in restaurantData:
+# #         validSequences = {}
+# #         for orderSequence in itertools.permutations(bundle):
+# #             validSequence = True
+# #             dominated = False
+# #             leeway = refinedBundleList[bundle][2] - refinedBundleList[bundle][1]
+# #             journeyCurrentTime = refinedBundleList[bundle][1]
+# #             currentLocX = restaurantData[refinedBundleList[bundle][0]][0]
+# #             currentLocY = restaurantData[refinedBundleList[bundle][0]][1]
+# #             journeyCurrentTime += pickupServiceTime / 2
+# #             for order in orderSequence:
+# #                 travelTime = math.sqrt((currentLocX-orderData[order][0])**2 + (currentLocY - orderData[order][1])**2) / travelSpeed
+# #                 journeyCurrentTime += travelTime + dropoffServiceTime / 2
+# #                 if journeyCurrentTime >= orderData[order][6]:
+# #                     validSequence = False
+# #                     break
+# #                 leeway = min(leeway, orderData[order][6] - journeyCurrentTime)
+# #                 journeyCurrentTime += dropoffServiceTime / 2
+# #                 currentLocX = orderData[order][0]
+# #                 currentLocY = orderData[order][1]
+          
+# #             if validSequence:
+# #                 travelTime = math.sqrt((currentLocX-restaurantData[restaurant][0])**2 + (currentLocY-restaurantData[restaurant][1])**2) / travelSpeed
+# #                 journeyCurrentTime += travelTime + pickupServiceTime / 2
+# #                 pickupRestaurant = refinedBundleList[bundle][0]
+# #                 earliestPickupTime = refinedBundleList[bundle][1]
+# #                 latestLeavingTime = earliestPickupTime + leeway
+# #                 totalTravelTime = journeyCurrentTime - earliestPickupTime
+                
+# #                 for sequence in validSequences:
+# #                     if validSequences[sequence][2] > latestLeavingTime and validSequences[sequence][3] < totalTravelTime:
+# #                         dominated = True
+# #                     if validSequences[sequence][2] < latestLeavingTime and validSequences[sequence][3] > totalTravelTime:
+# #                         validSequences.pop(sequence)
+# #                 if not dominated:
+# #                     validSequences[orderSequence] = [pickupRestaurant, earliestPickupTime, latestLeavingTime, totalTravelTime]
+                
+                
+                
+
+
+
+
+
+# variables = []
+# count = 0
+# for courier in courierData:
+#     for bundle in refinedBundleList:
+#         for nextRestaurant in restaurantData:
+#             if courierData[courier][2] < refinedBundleList[bundle][2]: # on time before latest leaving time
+#                 if courierData[courier][3] > refinedBundleList[bundle][1]: # off time after earliest leaving time
+#                     count += 1
+#                     for nextBundle in bundlesAtRestaurant[nextRestaurant]:
+#                         if courierData[courier][3] > refinedBundleList[nextBundle][1]:
+#                             variables.append((courier, bundle, nextRestaurant))
+#                             break
+
+# print('orders: ' + str(len(orderData)))
+# print('restaurants: ' + str(len(restaurantData)))
+# print('couriers: ' + str(len(courierData)))
+# print('bundles (with 2 or less orders): ' + str(len(refinedBundleList)) + ' (' + str(len(list(bundle for bundle in refinedBundleList if len(bundle) <= 2))) + ')')
+# print('variables (with 2 or less orders): ' + str(len(variables)) + ' (' + str(len(list(variable for variable in variables if len(variable[1]) <= 2))) + ')')
+
+sequencedBundleListByLengthAndRestaurant = {}
+# (restaurant, lengthOfBundle): {orderSequence: (orderSet, earliestLeavingTime, latestLeavingTime, totalTravelTime)}
+for restaurant in restaurantData:
+    bundlesOfCurrentLength = {}
+    lengthOfBundles = 1
+    print('length: ' + str(lengthOfBundles))
+    for order in ordersAtRestaurant:
+        bundlesOfCurrentLength[(order,)] = (frozenset((order,)), orderData[order][4], orderData[order][5], TravelTime(restaurantData[restaurant], orderData[order]) + (pickupServiceTime + dropoffServiceTime) / 2)
+    while len(bundlesOfCurrentLength) > 0:
+        sequencedBundleListByLengthAndRestaurant[(restaurant, lengthOfBundles)] = bundlesOfCurrentLength
+        print('number of bundles: ' + str(len(bundlesOfCurrentLength)))
+        bundlesOfCurrentLength = {}
+        lengthOfBundles += 1
+        print('length: ' + str(lengthOfBundles))
+        for orderSequence in sequencedBundleListByLengthAndRestaurant[(restaurant, lengthOfBundles-1)]:
+            data = sequencedBundleListByLengthAndRestaurant[(restaurant, lengthOfBundles-1)][orderSequence]
+            for order in ordersAtRestaurant:
+                if order not in orderSequence:
+                    newSequence = orderSequence + (order,)
+                    orderSet = frozenset(newSequence)
+                    earliestLeavingTime = max(data[1], orderData[order][4])
+                    if earliestLeavingTime < data[2]:
+                        travelTime = dropoffServiceTime + TravelTime(orderData[orderSequence[-1]], orderData[order])
+                        totalTravelTime = data[3] + travelTime
+                        if earliestLeavingTime + totalTravelTime < orderData[order][6]:
+                            latestLeavingTime = orderData[order][6] - totalTravelTime
+                            bundlesOfCurrentLength[newSequence] = (orderSet, earliestLeavingTime, latestLeavingTime, totalTravelTime)
+        if lengthOfBundles >= 3:
+            bundleComparisonDictionary = {}
+            bundlesToCut = []
+            for orderSequence in bundlesOfCurrentLength:
+                if (bundlesOfCurrentLength[orderSequence][0], orderSequence[-1]) not in bundleComparisonDictionary:
+                    bundleComparisonDictionary[(bundlesOfCurrentLength[orderSequence][0], orderSequence[-1])] = []
+                bundleComparisonDictionary[(bundlesOfCurrentLength[orderSequence][0], orderSequence[-1])].append(orderSequence)
+            for (i,j) in bundleComparisonDictionary:
+                for orderSequence in bundleComparisonDictionary[(i,j)]:
+                    for secondSequence in bundleComparisonDictionary[(i,j)]:
+                        if orderSequence != secondSequence:
+                            if bundlesOfCurrentLength[orderSequence][2] > bundlesOfCurrentLength[secondSequence][2]:
+                                if bundlesOfCurrentLength[orderSequence][3] < bundlesOfCurrentLength[secondSequence][3]:
+                                    bundlesToCut.append(secondSequence)
+                            if bundlesOfCurrentLength[orderSequence][2] < bundlesOfCurrentLength[secondSequence][2]:
+                                if bundlesOfCurrentLength[orderSequence][3] > bundlesOfCurrentLength[secondSequence][3]:
+                                    bundlesToCut.append(orderSequence)
+            print('cut bundles: ' + str(len(bundlesToCut)))
+            for bundle in set(bundlesToCut):
+                bundlesOfCurrentLength.pop(bundle)
