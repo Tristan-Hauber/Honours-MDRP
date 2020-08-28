@@ -103,10 +103,10 @@ for restaurant in restaurantData:
         calculatedSequences = newSequences
         for sequence in calculatedSequences:
             orderDeliverySequences[sequence] = calculatedSequences[sequence]
-
 print(str(len(orderDeliverySequences)) + ' delivery sequences')
 
 sequenceNextRestaurantPairs = {}
+# (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
 for sequence in orderDeliverySequences:
     finishTime = orderDeliverySequences[sequence][1] + orderDeliverySequences[sequence][3]
     for restaurant in restaurantData:
@@ -131,3 +131,23 @@ for pair in groupedPairs:
     for sequence in dominatedSequences:
         del sequenceNextRestaurantPairs[(sequence, pair[1])]
 print(str(len(sequenceNextRestaurantPairs)) + ' post-domination pairs')
+
+variables = set()
+for pair in sequenceNextRestaurantPairs:
+    leavingRestaurant = sequenceNextRestaurantPairs[pair][0]
+    earliestLeavingTime = sequenceNextRestaurantPairs[pair][1]
+    latestLeavingTime = sequenceNextRestaurantPairs[pair][2]
+    totalTravelTime = sequenceNextRestaurantPairs[pair][3]
+    earliestArrivalTime = earliestLeavingTime + totalTravelTime
+    for courier in courierData:
+        if earliestArrivalTime > courierData[courier][3]:
+            continue
+        commute = TravelTime(courierData[courier], restaurantData[leavingRestaurant])
+        if courierData[courier][2] + commute + pickupServiceTime / 2 < latestLeavingTime:
+            if courierData[courier][3] > earliestLeavingTime:
+                for order in ordersAtRestaurant[pair[1]]:
+                    if orderData[order][4] < courierData[courier][3] and orderData[order][5] > earliestArrivalTime:
+                        variables.add((courierData[courier][3],) + pair)
+                        break
+# TODO: Add entry and exit variables
+print(str(len(variables)) + ' total variables')
