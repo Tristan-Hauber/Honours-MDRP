@@ -11,6 +11,8 @@ from collections import defaultdict
 import itertools
 from time import time
 
+from operator import lt, gt
+
 courierData = {} # x y ontime offtime
 orderData = {} # x y placementtime restaurant readytime latestLeavingTime maxClickToDoorArrivalTime
 restaurantData = {} # x y
@@ -19,23 +21,26 @@ grubhubInstance = '0r50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 programStartTime = time()
 
-with open(fileDirectory + 'couriers.txt') as courierDataFile:
-    for line in courierDataFile:
-        if not line.startswith('courier'):
-            data = line.split('\t')
-            courierData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][:-1])]
+def WithoutLetters(string):
+    return string.translate({ord(i): None for i in 'abcdefghijklmnopqrstuvwxyz'})
 
-with open(fileDirectory + 'orders.txt') as orderDataFile:
-    for line in orderDataFile:
-        if not line.startswith('order'):
-            data = line.split('\t')
-            orderData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][1:]), int(data[5][:-1])]
+def OpenFile(fileName):
+    with open(fileDirectory + fileName) as file:
+        # Get lines, dropping header line
+        lines = file.read().splitlines()[1:]
+        dataDictionary = {}
+        for line in lines:
+            data = map(WithoutLetters, line.split('\t'))
+            data = list(map(int, data))
+            dataDictionary[data[0]] = data[1:]
+        return dataDictionary
 
-with open(fileDirectory + 'restaurants.txt') as restaurantDataFile:
-    for line in restaurantDataFile:
-        if not line.startswith('restaurant'):
-            data = line.split('\t')
-            restaurantData[int(data[0][1:])] = [int(data[1]), int(data[2][:-1])]
+courierData = OpenFile('couriers.txt')
+orderData = OpenFile('orders.txt')
+restaurantData = OpenFile('restaurants.txt')
+
+def GiveMeAStatusUpdate(label, collectionToDisplayLengthOf):
+    print(str(len(collectionToDisplayLengthOf)) + ' ' + label + ' ' + str(time() - programStartTime))
 
 with open(fileDirectory + 'instance_parameters.txt') as instanceParameters:
     instanceParameters.readline().strip()
@@ -64,8 +69,15 @@ def TravelTime(loc1, loc2):
 for order in orderData:
     maxClickToDoorArrivalTime = orderData[order][2] + maxClickToDoor
     travelTime = (pickupServiceTime + dropoffServiceTime) / 2 + TravelTime(restaurantData[orderData[order][3]], orderData[order])
+    orderDatum = orderData[order]
     orderData[order].append(maxClickToDoorArrivalTime - travelTime)
     orderData[order].append(maxClickToDoorArrivalTime)
+
+def SomeCompareOperation(op, dictionary, key1, key2, index):
+    return op(dictionary[key1][index], dictionary[key2][index])
+
+def SomeCombinedOperation(op1, op2, dictionary, key1, key2, index1, index2):
+    return SomeCompareOperation(op1, dictionary, key1, key2, index1) and SomeCompareOperation(op2, dictionary, key1, key2, index2)
 
 def RemoveDominatedSequences(sequences):
     sequencesBySetAndLastOrder = defaultdict(list)
@@ -75,9 +87,9 @@ def RemoveDominatedSequences(sequences):
     for group in sequencesBySetAndLastOrder:
         if len(sequencesBySetAndLastOrder[group]) > 1:
             for (sequence1, sequence2) in itertools.combinations(sequencesBySetAndLastOrder[group],2):
-                if sequences[sequence1][2] > sequences[sequence2][2] and sequences[sequence1][3] < sequences[sequence2][3]:
+                if SomeCombinedOperation(gt, lt, sequences, sequence1, sequence2, 2, 3):
                     dominatedSequences.add(sequence2)
-                elif sequences[sequence1][2] < sequences[sequence2][2] and sequences[sequence1][3] > sequences[sequence2][3]:
+                elif SomeCombinedOperation(lt, gt, sequences, sequence1, sequence2, 2, 3):
                     dominatedSequences.add(sequence1)
     for sequence in dominatedSequences:
         del sequences[sequence]
@@ -109,7 +121,7 @@ for restaurant in restaurantData:
         calculatedSequences = newSequences
         for sequence in calculatedSequences:
             orderDeliverySequences[sequence] = calculatedSequences[sequence]
-print(str(len(orderDeliverySequences)) + ' delivery sequences ' + str(time() - programStartTime))
+GiveMeAStatusUpdate('delivery sequences', orderDeliverySequences)
 
 sequenceNextRestaurantPairs = {}
 # (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
@@ -122,7 +134,7 @@ for sequence in orderDeliverySequences:
                 travelTime = orderDeliverySequences[sequence][3] + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
                 sequenceNextRestaurantPairs[(sequence, restaurant)] = orderDeliverySequences[sequence][:3] + [travelTime]
                 break
-print(str(len(sequenceNextRestaurantPairs)) + ' pre-domination pairs ' + str(time() - programStartTime))
+GiveMeAStatusUpdate('pre-domination pairs', sequenceNextRestaurantPairs)
 
 groupedPairs = defaultdict(list)
 for pair in sequenceNextRestaurantPairs:
@@ -130,13 +142,13 @@ for pair in sequenceNextRestaurantPairs:
 for pair in groupedPairs:
     dominatedSequences = set()
     for (sequence1, sequence2) in itertools.combinations(groupedPairs[pair], 2):
-        if sequenceNextRestaurantPairs[(sequence1, pair[1])][2] > sequenceNextRestaurantPairs[(sequence2, pair[1])][2] and sequenceNextRestaurantPairs[(sequence1, pair[1])][3] < sequenceNextRestaurantPairs[(sequence2, pair[1])][3]:
+        if SomeCombinedOperation(gt, lt, sequenceNextRestaurantPairs, (sequence1, pair[1]), (sequence2, pair[1]), 2, 3):
             dominatedSequences.add(sequence2)
-        elif sequenceNextRestaurantPairs[(sequence1, pair[1])][2] < sequenceNextRestaurantPairs[(sequence2, pair[1])][2] and sequenceNextRestaurantPairs[(sequence1, pair[1])][3] > sequenceNextRestaurantPairs[(sequence2, pair[1])][3]:
+        elif SomeCombinedOperation(lt, gt, sequenceNextRestaurantPairs, (sequence1, pair[1]), (sequence2, pair[1]), 2, 3):
             dominatedSequences.add(sequence1)
     for sequence in dominatedSequences:
         del sequenceNextRestaurantPairs[(sequence, pair[1])]
-print(str(len(sequenceNextRestaurantPairs)) + ' post-domination pairs ' + str(time() - programStartTime))
+GiveMeAStatusUpdate('post-domination pairs', sequenceNextRestaurantPairs)
 
 variables = set() # {(offTime1, sequence1, nextRestaurant1), (offTime2, sequence2, nextRestaurant2), ...}
 # Main variables
@@ -147,19 +159,21 @@ for pair in sequenceNextRestaurantPairs:
         if offTime > earliestLeavingTime:
             variableForOffTime = False
             for courier in couriersByOffTime[offTime]:
-                if earliestArrivalTime > courierData[courier][3]: # check that the courier is still in-shift when arriving at next restaurant
+                courierDatum = courierData[courier]
+                if earliestArrivalTime > courierDatum[3]: # check that the courier is still in-shift when arriving at next restaurant
                     continue
-                commute = TravelTime(courierData[courier], restaurantData[leavingRestaurant])
-                if courierData[courier][2] + commute + pickupServiceTime / 2 < latestLeavingTime:
-                    if courierData[courier][3] > earliestLeavingTime:
+                commute = TravelTime(courierDatum, restaurantData[leavingRestaurant])
+                if courierDatum[2] + commute + pickupServiceTime / 2 < latestLeavingTime:
+                    if courierDatum[3] > earliestLeavingTime:
                         for order in ordersAtRestaurant[pair[1]]:
-                            if orderData[order][4] < courierData[courier][3] and orderData[order][5] > earliestArrivalTime:
+                            orderDatum = orderData[order]
+                            if orderDatum[4] < courierDatum[3] and orderDatum[5] > earliestArrivalTime:
                                 variables.add((offTime,) + pair)
                                 variableForOffTime = True
                                 break
                 if variableForOffTime:
                     break
-print(str(len(variables)) + ' main variables ' + str(time() - programStartTime))
+GiveMeAStatusUpdate('main variables', variables)
 # Exit variables
 # Create sequence-courier (off time) pairs, with nextRestaurant = 0
 for sequence in orderDeliverySequences:
@@ -170,9 +184,10 @@ for sequence in orderDeliverySequences:
             # check that there is a courier that is on for this sequence
             # courier must be able to get to restaurant before latest leaving time
             for courier in couriersByOffTime[offTime]:
-                if courierData[courier][2] < latestLeavingTime: # added for hopefully a small speed-up?
-                    if courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 < latestLeavingTime:
+                courierDatum = courierData[courier]
+                if courierDatum[2] < latestLeavingTime: # added for hopefully a small speed-up?
+                    if courierDatum[2] + TravelTime(courierDatum, restaurantData[restaurant]) + pickupServiceTime / 2 < latestLeavingTime:
                         variables.add((offTime, sequence, 0))
                         break
 # TODO: Add entry and exit variables
-print(str(len(variables)) + ' main + exit variables ' + str(time() - programStartTime))
+GiveMeAStatusUpdate('main + exit variables', variables)
