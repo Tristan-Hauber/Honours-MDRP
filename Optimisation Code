@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Aug  6 15:43:43 2020
+
+@author: Tristan
+"""
+
+courierData = {} # x y ontime offtime
+orderData = {} # x y placementtime restaurant readytime
+restaurantData = {} # x y
+
+grubhubInstance = '0o50t75s1p100'
+fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
+
+with open(fileDirectory + 'couriers.txt') as courierDataFile:
+    for line in courierDataFile:
+        if not line.startswith('courier'):
+            data = line.split('\t')
+            courierData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][:-2])]
+
+with open(fileDirectory + 'orders.txt') as orderDataFile:
+    for line in orderDataFile:
+        if not line.startswith('order'):
+            data = line.split('\t')
+            orderData[int(data[0][1:])] = [int(data[1]), int(data[2]), int(data[3]), int(data[4][1:]), int(data[5][:-2])]
+
+with open(fileDirectory + 'restaurants.txt') as restaurantDataFile:
+    for line in restaurantDataFile:
+        if not line.startswith('restaurant'):
+            data = line.split('\t')
+            restaurantData[int(data[0][1:])] = [int(data[1]), int(data[2][:-2])]
+
+with open(fileDirectory + 'instance_parameters.txt') as instanceParameters:
+    instanceParameters.readline().strip()
+    parameters = instanceParameters.readline().strip().split('\t')
+    travelSpeed = int(parameters[0]) # metres per minute
+    pickupServiceTime = int(parameters[1]) # minutes
+    dropoffServiceTime = int(parameters[2]) # minutes
+    targetClickToDoor = int(parameters[3]) # minutes
+    maxClickToDoor = int(parameters[4]) # minutes
+    payPerDelivery = int(parameters[5]) # dollars
+    minPayPerHour = int(parameters[6]) # dollars
+
+ordersAtRestaurant = {restaurant: [] for restaurant in restaurantData}
+for order in orderData:
+    ordersAtRestaurant[orderData[order][3]].append(order)
+
+maxSizeBundles = []
+for restaurant in ordersAtRestaurant:
+    orderList = ordersAtRestaurant[restaurant]
+    for i in len(orderList):
+        order = orderList[i]
+        print()
