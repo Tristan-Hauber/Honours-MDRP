@@ -123,8 +123,18 @@ for restaurant in restaurantData:
             orderDeliverySequences[sequence] = calculatedSequences[sequence]
 GiveMeAStatusUpdate('delivery sequences', orderDeliverySequences)
 
-sequenceNextRestaurantPairs = {}
-# (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
+def CheckDominationPairs(sequenceToCheck, nextRestaurant):
+    dominatedSequences = []
+    for sequence in groupedPairs[(frozenset(sequenceToCheck), nextRestaurant)]:
+        if sequence != sequenceToCheck:
+            if SomeCombinedOperation(lt, gt, sequenceNextRestaurantPairs, (sequenceToCheck, nextRestaurant), (sequence, nextRestaurant), 2, 3):
+                return [sequenceToCheck]
+            if SomeCombinedOperation(gt, lt, sequenceNextRestaurantPairs, (sequenceToCheck, nextRestaurant), (sequence, nextRestaurant), 2, 3):
+                dominatedSequences.append(sequence)
+    return dominatedSequences
+
+sequenceNextRestaurantPairs = {} # (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
+groupedPairs = defaultdict(list) # (frozenset(sequence), nextRestaurant): [sequence1, sequence2, sequence3, ...]
 for sequence in orderDeliverySequences:
     finishTime = orderDeliverySequences[sequence][1] + orderDeliverySequences[sequence][3]
     for restaurant in restaurantData:
@@ -133,21 +143,38 @@ for sequence in orderDeliverySequences:
             if orderData[order][5] > arrivalAtRestaurant:
                 travelTime = orderDeliverySequences[sequence][3] + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
                 sequenceNextRestaurantPairs[(sequence, restaurant)] = orderDeliverySequences[sequence][:3] + [travelTime]
+                groupedPairs[(frozenset(sequence), restaurant)].append(sequence)
+                dominatedSequences = CheckDominationPairs(sequence, restaurant)
+                for dominatedSequence in dominatedSequences:
+                    del sequenceNextRestaurantPairs[(dominatedSequence, restaurant)]
+                    groupedPairs[(frozenset(sequence), restaurant)].remove(dominatedSequence)
                 break
-GiveMeAStatusUpdate('pre-domination pairs', sequenceNextRestaurantPairs)
 
-groupedPairs = defaultdict(list)
-for pair in sequenceNextRestaurantPairs:
-    groupedPairs[frozenset(pair[0]), pair[1]].append(pair[0])
-for pair in groupedPairs:
-    dominatedSequences = set()
-    for (sequence1, sequence2) in itertools.combinations(groupedPairs[pair], 2):
-        if SomeCombinedOperation(gt, lt, sequenceNextRestaurantPairs, (sequence1, pair[1]), (sequence2, pair[1]), 2, 3):
-            dominatedSequences.add(sequence2)
-        elif SomeCombinedOperation(lt, gt, sequenceNextRestaurantPairs, (sequence1, pair[1]), (sequence2, pair[1]), 2, 3):
-            dominatedSequences.add(sequence1)
-    for sequence in dominatedSequences:
-        del sequenceNextRestaurantPairs[(sequence, pair[1])]
+# sequenceNextRestaurantPairs = {}
+# for sequence in orderDeliverySequences:
+#     finishTime = orderDeliverySequences[sequence][1] + orderDeliverySequences[sequence][3]
+#     for restaurant in restaurantData:
+#         arrivalAtRestaurant = finishTime + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
+#         for order in ordersAtRestaurant[restaurant]:
+#             if orderData[order][5] > arrivalAtRestaurant:
+#                 travelTime = orderDeliverySequences[sequence][3] + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
+#                 sequenceNextRestaurantPairs[(sequence, restaurant)] = orderDeliverySequences[sequence][:3] + [travelTime]
+#                 break
+# GiveMeAStatusUpdate('pre-domination pairs', sequenceNextRestaurantPairs)
+
+# groupedPairs = defaultdict(list)
+# for pair in sequenceNextRestaurantPairs:
+#     groupedPairs[frozenset(pair[0]), pair[1]].append(pair[0])
+# print(max(len(groupedPairs[pair]) for pair in groupedPairs))
+# for pair in groupedPairs:
+#     dominatedSequences = set()
+#     for (sequence1, sequence2) in itertools.combinations(groupedPairs[pair], 2):
+#         if SomeCombinedOperation(gt, lt, sequenceNextRestaurantPairs, (sequence1, pair[1]), (sequence2, pair[1]), 2, 3):
+#             dominatedSequences.add(sequence2)
+#         elif SomeCombinedOperation(lt, gt, sequenceNextRestaurantPairs, (sequence1, pair[1]), (sequence2, pair[1]), 2, 3):
+#             dominatedSequences.add(sequence1)
+#     for sequence in dominatedSequences:
+#         del sequenceNextRestaurantPairs[(sequence, pair[1])]
 GiveMeAStatusUpdate('post-domination pairs', sequenceNextRestaurantPairs)
 
 variables = set() # {(offTime1, sequence1, nextRestaurant1), (offTime2, sequence2, nextRestaurant2), ...}
