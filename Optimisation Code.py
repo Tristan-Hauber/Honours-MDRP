@@ -17,9 +17,11 @@ courierData = {} # x y ontime offtime
 orderData = {} # x y placementtime restaurant readytime latestLeavingTime maxClickToDoorArrivalTime
 restaurantData = {} # x y
 
-grubhubInstance = '0r50t100s1p125'
+grubhubInstance = '0o50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 programStartTime = time()
+
+nodeTimeInterval = 8 # minutes between nodes
 
 def WithoutLetters(string):
     return string.translate({ord(i): None for i in 'abcdefghijklmnopqrstuvwxyz'})
@@ -206,4 +208,23 @@ for courier in courierData:
 GiveMeAStatusUpdate('all untimedArcs', untimedArcs)
 #TODO: Add model timedArcs
 #TODO: Add model constraints
-#TODO: Add (restaurant, time) nodes
+
+nodesInModel = set()
+for group in couriersByOffTime:
+    for restaurant in restaurantData:
+        earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 for courier in couriersByOffTime[group])
+        if earliestArrivalTime > group:
+            continue
+        deliverableOrders = set(order for order in ordersAtRestaurant[restaurant] if orderData[order][4] < group and orderData[order][5] > earliestArrivalTime)
+        if len(deliverableOrders) == 0:
+            continue
+        latestNodeTime = min(max(orderData[order][5] for order in deliverableOrders), group)
+        earliestNodeTime = max(min(orderData[order][4] for order in deliverableOrders), earliestArrivalTime)
+        if earliestNodeTime > latestNodeTime:
+            print('error!', group, restaurant, earliestNodeTime, latestNodeTime, earliestArrivalTime)
+        currentTime = earliestNodeTime
+        while currentTime < latestNodeTime:
+            nodesInModel.add((group, restaurant, currentTime))
+            currentTime += nodeTimeInterval
+        nodesInModel.add((group, restaurant, min(currentTime, latestNodeTime)))
+GiveMeAStatusUpdate('nodes generated', nodesInModel)
