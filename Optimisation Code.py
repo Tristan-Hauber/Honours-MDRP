@@ -65,6 +65,7 @@ for order in orderData:
 couriersByOffTime = defaultdict(list)
 for courier in courierData:
     couriersByOffTime[courierData[courier][3]].append(courier)
+globalOffTime = max(offTime for offTime in couriersByOffTime)
 
 def TravelTime(loc1, loc2):
     x1, y1 = loc1[0], loc1[1]
@@ -126,6 +127,11 @@ for restaurant in restaurantData:
         calculatedSequences = newSequences
         for sequence in calculatedSequences:
             orderDeliverySequences[sequence] = calculatedSequences[sequence]
+sequencesByRestaurantThenOrderSet = {}
+for sequence in orderDeliverySequences:
+    if orderDeliverySequences[sequence][0] not in sequencesByRestaurantThenOrderSet:
+        sequencesByRestaurantThenOrderSet[orderDeliverySequences[sequence][0]] = defaultdict(list)
+    sequencesByRestaurantThenOrderSet[orderData[sequence[0]][3]][frozenset(sequence)].append(sequence)
 GiveMeAStatusUpdate('delivery sequences', orderDeliverySequences)
 
 def CheckDominationPairs(sequenceToCheck, nextRestaurant):
@@ -239,7 +245,7 @@ for group in couriersByOffTime:
 GiveMeAStatusUpdate('nodes generated', nodesInModel)
 for offTime in couriersByOffTime:
     nodesInModel.add((offTime, 0, 0))
-    nodesInModel.add((offTime, 0, max(offTime2 for offTime2 in couriersByOffTime)))
+    nodesInModel.add((offTime, 0, globalOffTime))
 
 nodesByOfftimeRestaurantPair = defaultdict(list)
 # (offTime, departureRestaurant): [(offTime, departureRestaurant, time1), (offTime, departureRestaurant, time2), ...]
@@ -274,3 +280,34 @@ for pair in untimedArcsByCourierRestaurant:
                             arrivalNodeTime = max(node2[2] for node2 in nodesForArrivingPair if node2[2] <= arrivalTime)
                             timedArcs.add((offTime, departureRestaurant, node[2], sequence, nextRestaurant, arrivalNodeTime))
 GiveMeAStatusUpdate('pre-domination main timed arcs', timedArcs)
+
+# Waiting arcs
+def NodeTime(node):
+    return node[2]
+for pair in nodesByOfftimeRestaurantPair:
+    nodeList = nodesByOfftimeRestaurantPair[pair]
+    if len(nodeList) > 0:
+        nodeList.sort(key = NodeTime)
+        for i in range(1, len(nodeList)):
+            timedArcs.add((pair[0], pair[1], nodeList[i-1][2], (), pair[1], nodeList[i][2]))
+GiveMeAStatusUpdate('main + waiting arcs', timedArcs)
+
+# Entry arcs
+for pair in nodesByOfftimeRestaurantPair:
+    if len(nodesByOfftimeRestaurantPair[pair]) > 0:
+        earliestNodeTimeAtRestaurant = min(node[2] for node in nodesByOfftimeRestaurantPair[pair])
+        timedArcs.add((pair[0], 0, 0, (), pair[1], earliestNodeTimeAtRestaurant))
+GiveMeAStatusUpdate('main + waiting + entry arcs', timedArcs)
+
+# Exit arcs
+for pair in nodesByOfftimeRestaurantPair:
+    if len(nodesByOfftimeRestaurantPair[pair]) > 0 and pair[1] != 0:
+        for orderSet in sequencesByRestaurantThenOrderSet[pair[1]]:
+            sequences = sequencesByRestaurantThenOrderSet[pair[1]][orderSet]
+            latestLeavingTime = max(orderDeliverySequences[sequence][2] for sequence in sequences)
+            if min(node[2] for node in nodesByOfftimeRestaurantPair[pair]) > latestLeavingTime: continue
+            latestLeavingNodeTime = max(node[2] for node in nodesByOfftimeRestaurantPair[pair] if node[2] < latestLeavingTime)
+            for sequence in sequences:
+                if orderDeliverySequences[sequence][2] >= latestLeavingNodeTime:
+                    timedArcs.add((pair[0], pair[1], latestLeavingNodeTime, sequence, 0, globalOffTime))
+GiveMeAStatusUpdate('timed arcs', timedArcs)
