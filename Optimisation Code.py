@@ -197,19 +197,28 @@ for sequence in orderDeliverySequences:
                         break
 GiveMeAStatusUpdate('main + exit untimedArcs', untimedArcs)
 # Entry untimedArcs
-# Create courier (off time) pairs, with sequence = (0,)
+# Create courier (off time) pairs, with sequence = ()
 for courier in courierData:
     for restaurant in restaurantData:
         earliestArrival = courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2
         if earliestArrival < courierData[courier][3]:
             for order in ordersAtRestaurant[restaurant]:
                 if orderData[order][5] > courierData[courier][2] and orderData[order][4] < courierData[courier][3]:
-                    untimedArcs.add((courierData[courier][3], (0,), restaurant))
+                    untimedArcs.add((courierData[courier][3], (), restaurant))
 GiveMeAStatusUpdate('all untimedArcs', untimedArcs)
+untimedArcsByCourierRestaurant = defaultdict(list)
+# (offTime, departureRestaurant): [(offTime, sequence1, nextRestaurant1), (offTime, sequence2, nextRestaurant2), ...]
+for arc in untimedArcs:
+    if arc[1] == ():
+        untimedArcsByCourierRestaurant[(arc[0], 0)].append(arc)
+    else:
+        untimedArcsByCourierRestaurant[(arc[0], orderData[arc[1][0]][3])].append(arc)
+
 #TODO: Add model timedArcs
 #TODO: Add model constraints
 
 nodesInModel = set()
+# {(offTime1, restaurant1, time1), (offTime2, restaurant2, time2), ...}
 for group in couriersByOffTime:
     for restaurant in restaurantData:
         earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 for courier in couriersByOffTime[group])
@@ -228,3 +237,40 @@ for group in couriersByOffTime:
             currentTime += nodeTimeInterval
         nodesInModel.add((group, restaurant, min(currentTime, latestNodeTime)))
 GiveMeAStatusUpdate('nodes generated', nodesInModel)
+for offTime in couriersByOffTime:
+    nodesInModel.add((offTime, 0, 0))
+    nodesInModel.add((offTime, 0, max(offTime2 for offTime2 in couriersByOffTime)))
+
+nodesByOfftimeRestaurantPair = defaultdict(list)
+# (offTime, departureRestaurant): [(offTime, departureRestaurant, time1), (offTime, departureRestaurant, time2), ...]
+for node in nodesInModel:
+    nodesByOfftimeRestaurantPair[node[:2]].append(node)
+timedArcs = set()
+# An arc is defined by a (courierOffTime, restaurant1, time1, orderSequence, restaurant2, time2) sextuple
+# time2 is a function of time1, orderSequence, restaurant2
+for pair in untimedArcsByCourierRestaurant:
+    offTime, departureRestaurant = pair
+    if pair[1] != 0:
+        for arc in untimedArcsByCourierRestaurant[pair]:
+            sequence = arc[1]
+            nextRestaurant = arc[2]
+            if nextRestaurant != 0:
+                earliestDepartureTime, latestDepartureTime, travelTime = sequenceNextRestaurantPairs[(sequence, nextRestaurant)][1:]
+                earliestArrivalTime = earliestDepartureTime + travelTime
+                latestArrivalTime = latestDepartureTime + travelTime
+                nodesForArrivingPair = list(node for node in nodesByOfftimeRestaurantPair[pair[0], nextRestaurant] if node[2] < latestArrivalTime)
+                nodesForLeavingPair = list(node for node in nodesByOfftimeRestaurantPair[pair] if node[2] <= latestDepartureTime)
+                if len(nodesForLeavingPair) == 0:
+                    # TODO: Find out why this happens
+                    continue
+                if len(nodesForArrivingPair) == 0:
+                    nodesInModel.add((offTime, nextRestaurant, latestArrivalTime))
+                    latestDepartureNodeTime = max(node2[2] for node2 in nodesForLeavingPair)
+                    timedArcs.add((offTime, departureRestaurant, latestDepartureNodeTime, sequence, nextRestaurant, latestArrivalTime))
+                else:
+                    for node in nodesForLeavingPair:
+                        if node[2] >= min(node2[2] for node2 in nodesForArrivingPair) - travelTime: # latest permitted leaving time to arrive at one of the arriving nodes
+                            arrivalTime = node[2] + travelTime
+                            arrivalNodeTime = max(node2[2] for node2 in nodesForArrivingPair if node2[2] <= arrivalTime)
+                            timedArcs.add((offTime, departureRestaurant, node[2], sequence, nextRestaurant, arrivalNodeTime))
+GiveMeAStatusUpdate('pre-domination main timed arcs', timedArcs)
