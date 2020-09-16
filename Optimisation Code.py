@@ -10,8 +10,11 @@ import math
 from collections import defaultdict
 import itertools
 from time import time
+from gurobi import Model, quicksum, GRB
 
 from operator import lt, gt
+
+# gurobi optimisation method 2
 
 courierData = {} # x y ontime offtime
 orderData = {} # x y placementtime restaurant readytime latestLeavingTime maxClickToDoorArrivalTime
@@ -241,7 +244,6 @@ for group in couriersByOffTime:
         while currentTime < latestNodeTime:
             nodesInModel.add((group, restaurant, currentTime))
             currentTime += nodeTimeInterval
-        nodesInModel.add((group, restaurant, min(currentTime, latestNodeTime)))
 GiveMeAStatusUpdate('nodes generated', nodesInModel)
 for offTime in couriersByOffTime:
     nodesInModel.add((offTime, 0, 0))
@@ -264,21 +266,25 @@ for pair in untimedArcsByCourierRestaurant:
                 earliestDepartureTime, latestDepartureTime, travelTime = sequenceNextRestaurantPairs[(sequence, nextRestaurant)][1:]
                 earliestArrivalTime = earliestDepartureTime + travelTime
                 latestArrivalTime = latestDepartureTime + travelTime
-                nodesForArrivingPair = list(node for node in nodesByOfftimeRestaurantPair[pair[0], nextRestaurant] if node[2] < latestArrivalTime)
+                nodesForArrivingPair = nodesByOfftimeRestaurantPair[pair[0], nextRestaurant]
                 nodesForLeavingPair = list(node for node in nodesByOfftimeRestaurantPair[pair] if node[2] <= latestDepartureTime)
                 if len(nodesForLeavingPair) == 0:
-                    # TODO: Find out why this happens
+                    # TODO: Find out why this happens, maybe because the sequence is too long, and so is no longer a valid route?
                     continue
-                if len(nodesForArrivingPair) == 0:
+                if len(nodesForArrivingPair) == 0: # TODO: rather than add a node, go to the next/first node
                     nodesInModel.add((offTime, nextRestaurant, latestArrivalTime))
                     latestDepartureNodeTime = max(node2[2] for node2 in nodesForLeavingPair)
                     timedArcs.add((offTime, departureRestaurant, latestDepartureNodeTime, sequence, nextRestaurant, latestArrivalTime))
                 else:
+                    prevArc = None
                     for node in nodesForLeavingPair:
                         if node[2] >= min(node2[2] for node2 in nodesForArrivingPair) - travelTime: # latest permitted leaving time to arrive at one of the arriving nodes
                             arrivalTime = node[2] + travelTime
                             arrivalNodeTime = max(node2[2] for node2 in nodesForArrivingPair if node2[2] <= arrivalTime)
-                            timedArcs.add((offTime, departureRestaurant, node[2], sequence, nextRestaurant, arrivalNodeTime))
+                            if prevArc!=None and arrivalNodeTime==prevArc[-1]:
+                                timedArcs.remove(prevArc)
+                            prevArc = (offTime, departureRestaurant, node[2], sequence, nextRestaurant, arrivalNodeTime)
+                            timedArcs.add(prevArc)
 GiveMeAStatusUpdate('pre-domination main timed arcs', timedArcs)
 
 # Waiting arcs
@@ -311,3 +317,48 @@ for pair in nodesByOfftimeRestaurantPair:
                 if orderDeliverySequences[sequence][2] >= latestLeavingNodeTime:
                     timedArcs.add((pair[0], pair[1], latestLeavingNodeTime, sequence, 0, globalOffTime))
 GiveMeAStatusUpdate('timed arcs', timedArcs)
+# TODO: duplicating the on->off arcs. Remove one of them at some point
+
+print()
+m = Model('MDRP')
+
+arcsByDepartureNode = defaultdict(list)
+arcsByArrivalNode = defaultdict(list)
+for arc in timedArcs:
+    (c,r1,t1,s,r2,t2) = arc
+    if r1:
+        arcsByDepartureNode[(c,r1,t1)].append(arc)
+    if r2:
+        arcsByArrivalNode[(c,r2,t2)].append(arc)
+
+arcs = {arc: m.addVar(vtype=GRB.BINARY) for arc in timedArcs}
+GiveMeAStatusUpdate('variables', arcs)
+
+flowConstraint = {node:
+          m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) ==
+                      quicksum(arcs[arc] for arc in arcsByArrivalNode[node])
+          )
+      for node in nodesInModel}
+GiveMeAStatusUpdate('main flow constrants', flowConstraint)
+
+homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in timedArcs if arc[0] == c if arc[1] == 0 if arc[2] == 0 if arc[3] == ()) <= len(couriersByOffTime[c])) for c in couriersByOffTime}
+GiveMeAStatusUpdate('home constraints', homeArcs)
+
+deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in timedArcs if o in arc[3]) == 1) for o in orderData}
+GiveMeAStatusUpdate('order constraints', deliverOrders)
+
+print()
+m.optimize()
+
+print()
+print('Checking if all orders delivered...')
+usedArcs = list(arc for arc in arcs if arcs[arc].x > 0)
+for order in orderData:
+    orderFound = False
+    for arc in usedArcs:
+        if order in arc[3]:
+            orderFound = True
+            break
+    if not orderFound:
+        print(order)
+print('Completed checking orders')
