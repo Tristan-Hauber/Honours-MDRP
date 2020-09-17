@@ -324,15 +324,22 @@ m = Model('MDRP')
 
 arcsByDepartureNode = defaultdict(list)
 arcsByArrivalNode = defaultdict(list)
+arcsByCourier = defaultdict(list)
 for arc in timedArcs:
     (c,r1,t1,s,r2,t2) = arc
     if r1:
         arcsByDepartureNode[(c,r1,t1)].append(arc)
     if r2:
         arcsByArrivalNode[(c,r2,t2)].append(arc)
+    arcsByCourier[c].append(arc)
 
-arcs = {arc: m.addVar(vtype=GRB.BINARY) for arc in timedArcs}
-GiveMeAStatusUpdate('variables', arcs)
+arcs = {arc: m.addVar(vtype=GRB.INTEGER) for arc in timedArcs}
+GiveMeAStatusUpdate('arcs', arcs)
+
+payments = {courier: m.addVar() for courier in couriersByOffTime}
+GiveMeAStatusUpdate('payments', payments)
+
+m.setObjective(quicksum(payments[c] for c in couriersByOffTime))
 
 flowConstraint = {node:
           m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) ==
@@ -347,18 +354,65 @@ GiveMeAStatusUpdate('home constraints', homeArcs)
 deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in timedArcs if o in arc[3]) == 1) for o in orderData}
 GiveMeAStatusUpdate('order constraints', deliverOrders)
 
-print()
-m.optimize()
+arcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in arcsByCourier[c]) <= quicksum(arcs[arc] for arc in arcsByCourier[c] if not arc[1] if arc[4]) * len(timedArcs)) for c in couriersByOffTime}
+GiveMeAStatusUpdate('deliver only if leave home', arcsIffLeaveHome)
 
-print()
-print('Checking if all orders delivered...')
-usedArcs = list(arc for arc in arcs if arcs[arc].x > 0)
-for order in orderData:
-    orderFound = False
+paidPerDelivery = {c: m.addConstr(payments[c] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcs))}
+paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in couriersByOffTime[c]))}
+GiveMeAStatusUpdate('courier payments', paidPerDelivery)
+
+def ArcDeparture(arc):
+    return arc[2]
+def ArcArrival(arc):
+    return arc[5]
+
+newConstraints = True
+while newConstraints:
+    newConstraints = False
+    print()
+    m.optimize()
+    
+    print()
+    print('Checking if all orders delivered...')
+    usedArcs = list(arc for arc in arcs if arcs[arc].x > 0)
+    for order in orderData:
+        orderFound = False
+        for arc in usedArcs:
+            if order in arc[3]:
+                orderFound = True
+                break
+        if not orderFound:
+            print(order)
+    print('Completed checking orders')
+    
+    print()
+    print('Checking for invalid single-courier networks')
+    usedArcsByCourier = defaultdict(list)
     for arc in usedArcs:
-        if order in arc[3]:
-            orderFound = True
-            break
-    if not orderFound:
-        print(order)
-print('Completed checking orders')
+        usedArcsByCourier[arc[0]].append(arc)
+    for courier in usedArcsByCourier:
+        if len(couriersByOffTime[courier]) == 1:
+            arcsInRoute = list(arc for arc in usedArcsByCourier[courier] if not arc[1])
+            usedArcs = list(arc for arc in usedArcsByCourier[courier] if arc[1])
+            usedArcs.sort(key = ArcDeparture)
+            presentTime = courierData[couriersByOffTime[courier][0]][2]
+            restaurant = usedArcs[0][1]
+            presentTime += TravelTime(courierData[couriersByOffTime[courier][0]], restaurantData[restaurant])
+            for arc in usedArcs:
+                if arc[1] == arc[4] and arc[3] == ():
+                    arcsInRoute.append(arc)
+                    continue
+                if presentTime > orderDeliverySequences[arc[3]][2] or arc[1] != restaurant:
+                    print('Network ' + str(courier) + ' had an invalid route')
+                    m.addConstr(quicksum(arcs[arc] for arc in arcsInRoute) <= len(arcsInRoute) - 1)
+                    newConstraints = True
+                    break
+                    # arcsInRoute = []
+                presentTime = max(presentTime, orderDeliverySequences[arc[3]][1])
+                if arc[4] != 0:
+                    presentTime += sequenceNextRestaurantPairs[(arc[3],arc[4])][3]
+                    restaurant = arc[4]
+                    arcsInRoute.append(arc)
+    print('Completed checking networks')
+
+print('Time = ' + str(time() - programStartTime))
