@@ -223,9 +223,6 @@ for arc in untimedArcs:
     else:
         untimedArcsByCourierRestaurant[(arc[0], orderData[arc[1][0]][3])].append(arc)
 
-#TODO: Add model timedArcs
-#TODO: Add model constraints
-
 nodesInModel = set()
 # {(offTime1, restaurant1, time1), (offTime2, restaurant2, time2), ...}
 for group in couriersByOffTime:
@@ -321,19 +318,30 @@ GiveMeAStatusUpdate('timed arcs', timedArcs)
 
 print()
 m = Model('MDRP')
+# m.setParam('Method', 2)
 
 arcsByDepartureNode = defaultdict(list)
 arcsByArrivalNode = defaultdict(list)
 arcsByCourier = defaultdict(list)
+arcsByOrder = {o:[] for o in orderData}
+outArcsByCourier = defaultdict(list)
 for arc in timedArcs:
     (c,r1,t1,s,r2,t2) = arc
-    if r1:
-        arcsByDepartureNode[(c,r1,t1)].append(arc)
-    if r2:
-        arcsByArrivalNode[(c,r2,t2)].append(arc)
-    arcsByCourier[c].append(arc)
+    if t2 != t1:
+        if r1:
+            arcsByDepartureNode[(c,r1,t1)].append(arc)
+        else:
+            if t1 == 0:
+                if s != ():
+                    print('leaving home arc with orders!', arc)
+                outArcsByCourier[c].append(arc)
+        if r2:
+            arcsByArrivalNode[(c,r2,t2)].append(arc)
+        arcsByCourier[c].append(arc)
+        for o in arc[3]:
+            arcsByOrder[o].append(arc)
 
-arcs = {arc: m.addVar(vtype=GRB.INTEGER) for arc in timedArcs}
+arcs = {arc: m.addVar(vtype=GRB.INTEGER) for arc in timedArcs if arc[2] != arc[5]}
 GiveMeAStatusUpdate('arcs', arcs)
 
 payments = {courier: m.addVar() for courier in couriersByOffTime}
@@ -348,18 +356,19 @@ flowConstraint = {node:
       for node in nodesInModel}
 GiveMeAStatusUpdate('main flow constrants', flowConstraint)
 
-homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in timedArcs if arc[0] == c if arc[1] == 0 if arc[2] == 0 if arc[3] == ()) <= len(couriersByOffTime[c])) for c in couriersByOffTime}
+homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) <= len(couriersByOffTime[c])) for c in couriersByOffTime}
 GiveMeAStatusUpdate('home constraints', homeArcs)
 
-deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in timedArcs if o in arc[3]) == 1) for o in orderData}
+deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) == 1) for o in orderData}
 GiveMeAStatusUpdate('order constraints', deliverOrders)
 
 arcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in arcsByCourier[c]) <= quicksum(arcs[arc] for arc in arcsByCourier[c] if not arc[1] if arc[4]) * len(timedArcs)) for c in couriersByOffTime}
 GiveMeAStatusUpdate('deliver only if leave home', arcsIffLeaveHome)
 
-paidPerDelivery = {c: m.addConstr(payments[c] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcs))}
-paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in couriersByOffTime[c]))}
-GiveMeAStatusUpdate('courier payments', paidPerDelivery)
+paidPerDelivery = {c: m.addConstr(payments[c] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[c])) for c in couriersByOffTime}
+GiveMeAStatusUpdate('courier payments per delivery', paidPerDelivery)
+paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in couriersByOffTime[c])) for c in couriersByOffTime}
+GiveMeAStatusUpdate('courier payments per time', paidPerTime)
 
 def ArcDeparture(arc):
     return arc[2]
@@ -367,6 +376,52 @@ def ArcArrival(arc):
     return arc[5]
 
 newConstraints = True
+
+def FindInvalidRoute(courier, usedArcs):
+    addedConstraints = False
+    if len(couriersByOffTime[courier]) == 1:
+        arcsInRoute = list(arc for arc in usedArcs if not arc[1])
+        if len(arcsInRoute) > 1:
+            print('error: too many outbound arcs for number of couriers', courier)
+        usedArcs.sort(key = ArcDeparture)
+        usedArcs.remove(arcsInRoute[0])
+        presentTime = courierData[couriersByOffTime[courier][0]][2]
+        restaurant = usedArcs[0][1]
+        presentTime += TravelTime(courierData[couriersByOffTime[courier][0]], restaurantData[restaurant])
+        for arc in usedArcs:
+            if arc[1] == arc[4] and arc[3] == ():
+                arcsInRoute.append(arc)
+                continue
+            if arc[1] != restaurant:
+                print('Network ' + str(courier) + ' had an invalid route')
+                addedConstraints = True
+                m.addConstr(quicksum(arcs[arc] for arc in arcsInRoute) <= len(arcsInRoute) - 1)
+                break
+            if presentTime > orderDeliverySequences[arc[3]][2]:
+                print('Courier ' + str(courier) + ' was rushed off their feet')
+                addedConstraints = True
+                arcsInRoute.reverse()
+                reverseTime = orderDeliverySequences[arc[3]][2]
+                reverseRoute = [arc]
+                for reverseArc in usedArcs[1:]:
+                    reverseRoute.append(reverseArc)
+                    if reverseArc[1] == reverseArc[4] and reverseArc[3] == ():
+                        continue
+                    reverseTime -= orderDeliverySequences[reverseArc[3]][3]
+                    if reverseTime < orderDeliverySequences[reverseArc[3]][1]:
+                        m.addConstr(quicksum(arcs[arc] for arc in reverseRoute) <= len(reverseRoute) - 1)
+                        print('Constraint added')
+                        break
+                    reverseTime = min(reverseTime, orderDeliverySequences[reverseArc[3]][1])
+                break
+                    
+            presentTime = max(presentTime, orderDeliverySequences[arc[3]][1])
+            if arc[4] != 0:
+                presentTime += sequenceNextRestaurantPairs[(arc[3],arc[4])][3]
+                restaurant = arc[4]
+                arcsInRoute.append(arc)
+    return addedConstraints
+
 while newConstraints:
     newConstraints = False
     print()
@@ -391,28 +446,9 @@ while newConstraints:
     for arc in usedArcs:
         usedArcsByCourier[arc[0]].append(arc)
     for courier in usedArcsByCourier:
-        if len(couriersByOffTime[courier]) == 1:
-            arcsInRoute = list(arc for arc in usedArcsByCourier[courier] if not arc[1])
-            usedArcs = list(arc for arc in usedArcsByCourier[courier] if arc[1])
-            usedArcs.sort(key = ArcDeparture)
-            presentTime = courierData[couriersByOffTime[courier][0]][2]
-            restaurant = usedArcs[0][1]
-            presentTime += TravelTime(courierData[couriersByOffTime[courier][0]], restaurantData[restaurant])
-            for arc in usedArcs:
-                if arc[1] == arc[4] and arc[3] == ():
-                    arcsInRoute.append(arc)
-                    continue
-                if presentTime > orderDeliverySequences[arc[3]][2] or arc[1] != restaurant:
-                    print('Network ' + str(courier) + ' had an invalid route')
-                    m.addConstr(quicksum(arcs[arc] for arc in arcsInRoute) <= len(arcsInRoute) - 1)
-                    newConstraints = True
-                    break
-                    # arcsInRoute = []
-                presentTime = max(presentTime, orderDeliverySequences[arc[3]][1])
-                if arc[4] != 0:
-                    presentTime += sequenceNextRestaurantPairs[(arc[3],arc[4])][3]
-                    restaurant = arc[4]
-                    arcsInRoute.append(arc)
+        addedConstraints = FindInvalidRoute(courier, usedArcsByCourier[courier])
+        if addedConstraints:
+            newConstraints = True
     print('Completed checking networks')
 
 print('Time = ' + str(time() - programStartTime))
