@@ -377,6 +377,61 @@ def ArcArrival(arc):
 
 newConstraints = True
 
+def SplitIntoRoutes(courier, usedArcs):
+    usedArcs = list(arc for arc in usedArcs if arc[1] != arc[4] or arc[3] != () or arc[4] == 0)
+    usedArcs.sort(key=ArcDeparture)
+    departureArcs = list(arc for arc in usedArcs if arc[1] == 0)
+    routes = {i: [[departureArcs[i]], 0, 0] for i in range(len(departureArcs))} # courier number: [route], current restaurant, current time
+    for arc in departureArcs:
+        usedArcs.remove(arc)
+    while len(usedArcs) > 0:
+        arc = usedArcs[0]
+        foundRouteForArc = False
+        for route in routes:
+            if arc[1] == routes[route][1] and orderDeliverySequences[arc[3]][1] > routes[route][2]:
+                routes[route][0].append(arc)
+                foundRouteForArc = True
+                routes[route][1] = arc[4]
+                if arc[4] != 0:
+                    routes[route][2] = max(routes[route][2], orderDeliverySequences[arc[3]][1]) + sequenceNextRestaurantPairs[(arc[3], arc[4])][3]                    
+                break
+        if not foundRouteForArc:
+            print('Error! Could not complete route')
+            break
+    return tuple(routes[route][0] for route in routes)
+
+def CheckIfFeasible(courierGroup, route):
+    addedConstraints = False
+    firstRestaurant = route[0][4]
+    currentTime = min(TravelTime(restaurantData[firstRestaurant], courierData[courier]) + courierData[courier][2] for courier in couriersByOffTime[courierGroup]) + pickupServiceTime / 2
+    journey = [route[0]]
+    for arc in route[1:-1]:
+        if currentTime > orderDeliverySequences[arc[3]][2]:
+            journey.reverse()
+            reverseJourney = []
+            departureTime = sequenceNextRestaurantPairs[(journey[0][3], journey[0][4])][2]
+            for reverseArc in journey:
+                if departureTime < sequenceNextRestaurantPairs[(reverseArc[3], reverseArc[4])][1]:
+                    nodesInRoute = list(usedArc[0:3] for usedArc in reverseJourney).sort(key=ArcDeparture)[1:]
+                    m.addConstr(quicksum(arcs[arc] for arc in reverseJourney[:-1]) <= quicksum(arcs[arc] for arc in arcsByDepartureNode[node] for node in nodesInRoute) - len(nodesInRoute))
+                    m.addConstr(quicksum(arcs[arc] for arc in reverseJourney[1:]) <= quicksum(arcs[arc] for arc in arcsByArrivalNode[node] for node in nodesInRoute) - len(nodesInRoute))
+                    addedConstraints = True
+                    break
+                departureTime = min(departureTime, sequenceNextRestaurantPairs[(reverseArc[3], reverseArc[4])][2])
+                departureTime -= sequenceNextRestaurantPairs[(reverseArc[3], reverseArc[4])][3]
+                reverseJourney.append(arc)
+            break
+        currentTime = max(currentTime, sequenceNextRestaurantPairs[(arc[3], arc[4])])
+        currentTime += sequenceNextRestaurantPairs[(arc[3], arc[4])][3]
+        journey.append(arc)
+    return addedConstraints
+
+def CutInfeasibleRoute(courier, usedArcs):
+    courierRoutes = SplitIntoRoutes(courier, usedArcs)
+    for route in courierRoutes:
+        feasibility = CheckIfFeasible(courier, route)
+    return feasibility
+
 def FindInvalidRoute(courier, usedArcs):
     addedConstraints = False
     if len(couriersByOffTime[courier]) == 1:
@@ -420,6 +475,8 @@ def FindInvalidRoute(courier, usedArcs):
                 presentTime += sequenceNextRestaurantPairs[(arc[3],arc[4])][3]
                 restaurant = arc[4]
                 arcsInRoute.append(arc)
+    else:
+        addedConstraints = CutInfeasibleRoute(courier, usedArcs)
     return addedConstraints
 
 while newConstraints:
