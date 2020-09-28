@@ -318,7 +318,7 @@ GiveMeAStatusUpdate('timed arcs', timedArcs)
 
 print()
 m = Model('MDRP')
-# m.setParam('Method', 2)
+m.setParam('Method', 2)
 
 arcsByDepartureNode = defaultdict(list)
 arcsByArrivalNode = defaultdict(list)
@@ -381,14 +381,14 @@ def SplitIntoRoutes(courier, usedArcs):
     usedArcs = list(arc for arc in usedArcs if arc[1] != arc[4] or arc[3] != () or arc[4] == 0)
     usedArcs.sort(key=ArcDeparture)
     departureArcs = list(arc for arc in usedArcs if arc[1] == 0)
-    routes = {i: [[departureArcs[i]], 0, 0] for i in range(len(departureArcs))} # courier number: [route], current restaurant, current time
+    routes = {i: [[departureArcs[i]], departureArcs[i][4], departureArcs[i][5]] for i in range(len(departureArcs))} # courier number: [route], current restaurant, current time
     for arc in departureArcs:
         usedArcs.remove(arc)
     while len(usedArcs) > 0:
         arc = usedArcs[0]
         foundRouteForArc = False
         for route in routes:
-            if arc[1] == routes[route][1] and orderDeliverySequences[arc[3]][1] > routes[route][2]:
+            if arc[1] == routes[route][1] and orderDeliverySequences[arc[3]][1] >= routes[route][2]:
                 routes[route][0].append(arc)
                 foundRouteForArc = True
                 routes[route][1] = arc[4]
@@ -397,6 +397,8 @@ def SplitIntoRoutes(courier, usedArcs):
                 break
         if not foundRouteForArc:
             print('Error! Could not complete route')
+            print(courier, usedArcs, departureArcs, routes)
+            xxxx
             break
     return tuple(routes[route][0] for route in routes)
 
@@ -498,7 +500,7 @@ while newConstraints:
     print('Completed checking orders')
     
     print()
-    print('Checking for invalid single-courier networks')
+    print('Checking for invalid courier networks')
     usedArcsByCourier = defaultdict(list)
     for arc in usedArcs:
         usedArcsByCourier[arc[0]].append(arc)
