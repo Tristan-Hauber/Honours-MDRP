@@ -64,10 +64,6 @@ ordersAtRestaurant = {restaurant: [] for restaurant in restaurantData}
 for order in orderData:
     ordersAtRestaurant[orderData[order][3]].append(order)
 
-couriersByOffTime = defaultdict(list)
-for courier in courierData:
-    couriersByOffTime[courierData[courier][3]].append(courier)
-
 courierGroups = {}
 if groupCouriersByOffTime:
     for courier in courierData:
@@ -243,15 +239,16 @@ for arc in untimedArcs:
 
 nodesInModel = set()
 # {(offTime1, restaurant1, time1), (offTime2, restaurant2, time2), ...}
-for group in couriersByOffTime:
+for group in courierGroups:
+    offTime = courierGroups[group][1]
     for restaurant in restaurantData:
-        earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 for courier in couriersByOffTime[group])
-        if earliestArrivalTime > group:
+        earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 for courier in courierGroups[group][0])
+        if earliestArrivalTime > offTime:
             continue
-        deliverableOrders = set(order for order in ordersAtRestaurant[restaurant] if orderData[order][4] < group and orderData[order][5] > earliestArrivalTime)
+        deliverableOrders = set(order for order in ordersAtRestaurant[restaurant] if orderData[order][4] < offTime and orderData[order][5] > earliestArrivalTime)
         if len(deliverableOrders) == 0:
             continue
-        latestNodeTime = min(max(orderData[order][5] for order in deliverableOrders), group)
+        latestNodeTime = min(max(orderData[order][5] for order in deliverableOrders), offTime)
         earliestNodeTime = max(min(orderData[order][4] for order in deliverableOrders), earliestArrivalTime)
         if earliestNodeTime > latestNodeTime:
             print('error!', group, restaurant, earliestNodeTime, latestNodeTime, earliestArrivalTime)
@@ -260,7 +257,8 @@ for group in couriersByOffTime:
             nodesInModel.add((group, restaurant, currentTime))
             currentTime += nodeTimeInterval
 GiveMeAStatusUpdate('nodes generated', nodesInModel)
-for offTime in couriersByOffTime:
+for group in courierGroups:
+    offTime = courierGroups[group][1]
     nodesInModel.add((offTime, 0, 0))
     nodesInModel.add((offTime, 0, globalOffTime))
 
@@ -362,10 +360,10 @@ for arc in timedArcs:
 arcs = {arc: m.addVar(vtype=GRB.INTEGER) for arc in timedArcs if arc[2] != arc[5]}
 GiveMeAStatusUpdate('arcs', arcs)
 
-payments = {courier: m.addVar() for courier in couriersByOffTime}
+payments = {group: m.addVar() for group in courierGroups}
 GiveMeAStatusUpdate('payments', payments)
 
-m.setObjective(quicksum(payments[c] for c in couriersByOffTime))
+m.setObjective(quicksum(payments[c] for c in courierGroups))
 
 flowConstraint = {node:
           m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) ==
@@ -374,18 +372,18 @@ flowConstraint = {node:
       for node in nodesInModel}
 GiveMeAStatusUpdate('main flow constrants', flowConstraint)
 
-homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) <= len(couriersByOffTime[c])) for c in couriersByOffTime}
+homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) <= len(courierGroups[c])) for c in courierGroups}
 GiveMeAStatusUpdate('home constraints', homeArcs)
 
 deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) == 1) for o in orderData}
 GiveMeAStatusUpdate('order constraints', deliverOrders)
 
-arcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in arcsByCourier[c]) <= quicksum(arcs[arc] for arc in arcsByCourier[c] if not arc[1] if arc[4]) * len(timedArcs)) for c in couriersByOffTime}
+arcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in arcsByCourier[c]) <= quicksum(arcs[arc] for arc in arcsByCourier[c] if not arc[1] if arc[4]) * len(timedArcs)) for c in courierGroups}
 GiveMeAStatusUpdate('deliver only if leave home', arcsIffLeaveHome)
 
-paidPerDelivery = {c: m.addConstr(payments[c] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[c])) for c in couriersByOffTime}
+paidPerDelivery = {c: m.addConstr(payments[c] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[c])) for c in courierGroups}
 GiveMeAStatusUpdate('courier payments per delivery', paidPerDelivery)
-paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in couriersByOffTime[c])) for c in couriersByOffTime}
+paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[c][0])) for c in courierGroups}
 GiveMeAStatusUpdate('courier payments per time', paidPerTime)
 
 def ArcDeparture(arc):
@@ -423,7 +421,7 @@ def SplitIntoRoutes(courier, usedArcs):
 def CheckIfFeasible(courierGroup, route):
     addedConstraints = False
     firstRestaurant = route[0][4]
-    currentTime = min(TravelTime(restaurantData[firstRestaurant], courierData[courier]) + courierData[courier][2] for courier in couriersByOffTime[courierGroup]) + pickupServiceTime / 2
+    currentTime = min(TravelTime(restaurantData[firstRestaurant], courierData[courier]) + courierData[courier][2] for courier in courierGroups[courierGroup][0]) + pickupServiceTime / 2
     journey = [route[0]]
     for arc in route[1:-1]:
         if currentTime > orderDeliverySequences[arc[3]][2]:
@@ -446,34 +444,34 @@ def CheckIfFeasible(courierGroup, route):
         journey.append(arc)
     return addedConstraints
 
-def CutInfeasibleRoute(courier, usedArcs):
-    courierRoutes = SplitIntoRoutes(courier, usedArcs)
+def CutInfeasibleRoute(group, usedArcs):
+    courierRoutes = SplitIntoRoutes(group, usedArcs)
     for route in courierRoutes:
-        feasibility = CheckIfFeasible(courier, route)
+        feasibility = CheckIfFeasible(group, route)
     return feasibility
 
-def FindInvalidRoute(courier, usedArcs):
+def FindInvalidRoute(group, usedArcs):
     addedConstraints = False
-    if len(couriersByOffTime[courier]) == 1:
+    if len(courierGroups[group][0]) == 1:
         arcsInRoute = list(arc for arc in usedArcs if not arc[1])
         if len(arcsInRoute) > 1:
-            print('error: too many outbound arcs for number of couriers', courier)
+            print('error: too many outbound arcs for number of couriers', group)
         usedArcs.sort(key = ArcDeparture)
         usedArcs.remove(arcsInRoute[0])
-        presentTime = courierData[couriersByOffTime[courier][0]][2]
+        presentTime = courierData[courierGroups[group][0][0]][2]
         restaurant = usedArcs[0][1]
-        presentTime += TravelTime(courierData[couriersByOffTime[courier][0]], restaurantData[restaurant])
+        presentTime += TravelTime(courierData[courierGroups[group][0][0]], restaurantData[restaurant])
         for arc in usedArcs:
             if arc[1] == arc[4] and arc[3] == ():
                 arcsInRoute.append(arc)
                 continue
             if arc[1] != restaurant:
-                print('Network ' + str(courier) + ' had an invalid route')
+                print('Network ' + str(group) + ' had an invalid route')
                 addedConstraints = True
                 m.addConstr(quicksum(arcs[arc] for arc in arcsInRoute) <= len(arcsInRoute) - 1)
                 break
             if presentTime > orderDeliverySequences[arc[3]][2]:
-                print('Courier ' + str(courier) + ' was rushed off their feet')
+                print('group ' + str(group) + ' was rushed off their feet')
                 addedConstraints = True
                 arcsInRoute.reverse()
                 reverseTime = orderDeliverySequences[arc[3]][2]
@@ -496,7 +494,7 @@ def FindInvalidRoute(courier, usedArcs):
                 restaurant = arc[4]
                 arcsInRoute.append(arc)
     else:
-        addedConstraints = CutInfeasibleRoute(courier, usedArcs)
+        addedConstraints = CutInfeasibleRoute(group, usedArcs)
     return addedConstraints
 
 while newConstraints:
