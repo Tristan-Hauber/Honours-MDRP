@@ -18,9 +18,9 @@ Created on Thu Aug  6 15:43:43 2020
 # Done: Convert untimed arcs to timed arcs
 # Done: Add model variables
 # Done: Add model constraints
-# TODO: Solve linear model
+# Done: Solve linear model
 # TODO: Add valid inequality cuts in callback
-# Done: Solve integer model
+# TODO: Solve integer model
 # TODO: Add illegal path elimination constraints in callback
 
 # Improvements:
@@ -28,6 +28,8 @@ Created on Thu Aug  6 15:43:43 2020
 # TODO: Put sequence + pair domination into the one function
 # TODO: Properly remove arcs that go backwards in time
 # TODO: Properly remove duplicate on-off arcs
+# TODO: Properly remove arcs that go to the same node as they left
+# TODO: Remove or formalise home -> home arcs
 
 import math
 from collections import defaultdict
@@ -48,7 +50,7 @@ programStartTime = time()
 
 nodeTimeInterval = 8 # minutes between nodes
 groupCouriersByOffTime = True
-orderProportion = 0.5
+orderProportion = 1
 seed = 0
 
 def WithoutLetters(string):
@@ -386,7 +388,7 @@ for arc in timedArcs:
         if r1:
             arcsByDepartureNode[(c,r1,t1)].append(arc)
         else:
-            if t1 == 0:
+            if t1 == 0 and r2 != 0:
                 if s != ():
                     print('leaving home arc with orders!', arc)
                 outArcsByCourier[c].append(arc)
@@ -396,7 +398,7 @@ for arc in timedArcs:
         for o in arc[3]:
             arcsByOrder[o].append(arc)
 
-arcs = {arc: m.addVar(vtype=GRB.INTEGER) for arc in timedArcs if arc[2] < arc[5]}
+arcs = {arc: m.addVar() for arc in timedArcs if arc[2] < arc[5]}
 GiveMeAStatusUpdate('arcs', arcs)
 
 payments = {group: m.addVar() for group in courierGroups}
@@ -405,30 +407,33 @@ GiveMeAStatusUpdate('payments', payments)
 m.setObjective(quicksum(payments[c] for c in courierGroups))
 
 flowConstraint = {node:
-          m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) ==
-                      quicksum(arcs[arc] for arc in arcsByArrivalNode[node])
+          m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) 
+                      == quicksum(arcs[arc] for arc in arcsByArrivalNode[node])
           )
       for node in nodesInModel}
 GiveMeAStatusUpdate('main flow constrants', flowConstraint)
 
-homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) <= len(courierGroups[c])) for c in courierGroups}
+homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) 
+                           <= len(courierGroups[c])) for c in courierGroups}
 GiveMeAStatusUpdate('home constraints', homeArcs)
 
-deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) == 1) for o in orderData}
+deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) 
+                                >= 1) for o in orderData}
 GiveMeAStatusUpdate('order constraints', deliverOrders)
 
-arcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in arcsByCourier[c]) <= quicksum(arcs[arc] for arc in arcsByCourier[c] if not arc[1] if arc[4]) * len(timedArcs)) for c in courierGroups}
+arcsIffLeaveHome = {c: m.addConstr(
+    quicksum(arcs[arc] for arc in arcsByCourier[c]) <= 
+    quicksum(arcs[arc] for arc in outArcsByCourier[c]) * len(arcsByCourier[c])) 
+    for c in courierGroups}
 GiveMeAStatusUpdate('deliver only if leave home', arcsIffLeaveHome)
 
-paidPerDelivery = {c: m.addConstr(payments[c] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[c])) for c in courierGroups}
+paidPerDelivery = {c: m.addConstr(payments[c] >= 
+                              quicksum(arcs[arc] * len(arc[3]) * payPerDelivery 
+                                       for arc in arcsByCourier[c])) 
+                   for c in courierGroups}
 GiveMeAStatusUpdate('courier payments per delivery', paidPerDelivery)
 paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[c][0])) for c in courierGroups}
 GiveMeAStatusUpdate('courier payments per time', paidPerTime)
-
-def ArcDeparture(arc):
-    return arc[2]
-def ArcArrival(arc):
-    return arc[5]
 
 # def ComputeAndRemoveIllegalPaths(listOfArcs, courierGroup):
 #     arcStats = {} # untimedArc: departureRestaurant, earliestDepartureTime, latestDepartureTime, durationOfTravel, arrivalRestaurant
