@@ -6,25 +6,35 @@ Created on Thu Aug  6 15:43:43 2020
 @author: Tristan
 """
 
-# Import data
-# TODO: If desired, have the ability to cut out some of the data
-# TODO: (Fix) Find all order sequences
-# TODO: Find all sequence+restaurant pairs, dominating while calculating
-# TODO: Dominate order sequences
-# TODO: Create untimed arcs
-# TODO: Create model nodes
-# TODO: Convert untimed arcs to timed arcs (as variables)
-# TODO: Add model constraints
+# Program outline
+# Done: Import data
+# Done: If desired, have the ability to cut out some of the data
+# Done: Find all order sequences
+# Done: Dominate order sequences
+# Done: Find all sequence-restaurant pairs
+# Done: Dominate sequence-restaurant pairs
+# Done: Create untimed arcs
+# Done: Create model nodes
+# Done: Convert untimed arcs to timed arcs
+# Done: Add model variables
+# Done: Add model constraints
 # TODO: Solve linear model
 # TODO: Add valid inequality cuts in callback
-# TODO: Solve integer model
+# Done: Solve integer model
 # TODO: Add illegal path elimination constraints in callback
+
+# Improvements:
+# TODO: Merge sequence-restaurant pair generation with sequence generation
+# TODO: Put sequence + pair domination into the one function
+# TODO: Properly remove arcs that go backwards in time
+# TODO: Properly remove duplicate on-off arcs
 
 import math
 from collections import defaultdict
 import itertools
 from time import time
 from gurobi import Model, quicksum, GRB
+import random
 
 from operator import lt, gt
 
@@ -38,6 +48,8 @@ programStartTime = time()
 
 nodeTimeInterval = 8 # minutes between nodes
 groupCouriersByOffTime = True
+orderProportion = 0.5
+seed = 0
 
 def WithoutLetters(string):
     return string.translate({ord(i): None for i in 'abcdefghijklmnopqrstuvwxyz'})
@@ -78,6 +90,23 @@ ordersAtRestaurant = {restaurant: [] for restaurant in restaurantData}
 for order in orderData:
     ordersAtRestaurant[orderData[order][3]].append(order)
 
+if orderProportion < 1.0:
+    random.seed(seed)
+    totalOrderCount = len(orderData)
+    restaurantsRemoved = []
+    while len(orderData) > totalOrderCount * orderProportion:
+        removedRestaurant = random.choice(list(restaurantData.keys()))
+        for order in ordersAtRestaurant[removedRestaurant]:
+            del orderData[order]
+        del ordersAtRestaurant[removedRestaurant]
+        del restaurantData[removedRestaurant]
+        restaurantsRemoved.append(removedRestaurant)
+    print()
+    print('Seed = ' + str(seed))
+    print('Removed restaurants ' + str(restaurantsRemoved))
+    print('Now at ' + str(len(orderData)) + ' orders, down from ' + str(totalOrderCount))
+    print()
+        
 courierGroups = {}
 if groupCouriersByOffTime:
     for courier in courierData:
@@ -161,7 +190,6 @@ for sequence in orderDeliverySequences:
 GiveMeAStatusUpdate('delivery sequences', orderDeliverySequences)
 
 def CheckDominationPairs(sequenceToCheck, nextRestaurant):
-    # TODO: Maybe use this function in the previous domination checking function?
     dominatedSequences = []
     for sequence in groupedPairs[(frozenset(sequenceToCheck), nextRestaurant)]:
         if sequence != sequenceToCheck:
@@ -173,7 +201,6 @@ def CheckDominationPairs(sequenceToCheck, nextRestaurant):
 
 sequenceNextRestaurantPairs = {} # (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
 groupedPairs = defaultdict(list) # (frozenset(sequence), nextRestaurant): [sequence1, sequence2, sequence3, ...]
-# TODO: combine this with sequence generation in an efficient manner
 for sequence in orderDeliverySequences:
     finishTime = orderDeliverySequences[sequence][1] + orderDeliverySequences[sequence][3]
     for restaurant in restaurantData:
@@ -296,9 +323,8 @@ for pair in untimedArcsByCourierRestaurant:
                 nodesForArrivingPair = nodesByOfftimeRestaurantPair[pair[0], nextRestaurant]
                 nodesForLeavingPair = list(node for node in nodesByOfftimeRestaurantPair[pair] if node[2] <= latestDepartureTime)
                 if len(nodesForLeavingPair) == 0:
-                    # TODO: Find out why this happens, maybe because the sequence is too long, and so is no longer a valid route?
                     continue
-                if len(nodesForArrivingPair) == 0: # TODO: rather than add a node, go to the next/first node
+                if len(nodesForArrivingPair) == 0:
                     nodesInModel.add((offTime, nextRestaurant, latestArrivalTime))
                     latestDepartureNodeTime = max(node2[2] for node2 in nodesForLeavingPair)
                     timedArcs.add((offTime, departureRestaurant, latestDepartureNodeTime, sequence, nextRestaurant, latestArrivalTime))
@@ -409,7 +435,7 @@ def ArcArrival(arc):
 #     for timedArc in listOfArcs:
 #         _, departureRestaurant, _, orderSequence, arrivalRestaurant, _ = timedArc
 #         newArc = (departureRestaurant, orderSequence, arrivalRestaurant)
-#         if departureRestaurant == 0: # TODO: Confirm that this duration of travel is for the closest courier
+#         if departureRestaurant == 0:
 #             earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[arrivalRestaurant]) for courier in courierGroups[courierGroup][0]) + pickupServiceTime / 2
 #             durationOfTravel = min(TravelTime(courierData[courier], restaurantData[arrivalRestaurant]) for courier in courierGroups[courierGroup][0]) + pickupServiceTime / 2
 #             earliestDepartureTime = earliestArrivalTime - durationOfTravel
@@ -470,6 +496,3 @@ def ArcArrival(arc):
 m.optimize()
 
 print('Time = ' + str(time() - programStartTime))
-
-# TODO: Remove arcs that go backwards in time
-# TODO: Remove duplicate on-off arcs
