@@ -511,41 +511,44 @@ GiveMeAStatusUpdate('courier payments per time', paidPerTime)
 #         didAddNewConstraints = didAddNewConstraints or ComputeAndRemoveIllegalPaths(usedArcsByGroup[group], group)
 #     return didAddNewConstraints
 
-# m.optimize()
 didAddVIConstraints = True
 validInequalityUntimedArcs = []
 # validInequalityPredecessorConstraints = {}
 while didAddVIConstraints:
     didAddVIConstraints = False
     m.optimize()
-    usedUntimedArcs = [] # (courierGroup, r1, orderSequence, r2)
+    usedUntimedArcs = [] # (courierGroup, orderSequence, r2)
     for arc in arcs:
         if arcs[arc].x > 0.000000001: # arc was turned on
             if arc[1] != arc[4] or arc[3] != (): # not a waiting arc
                 untimedArc = (arc[0], arc[3], arc[4])
                 if untimedArc not in validInequalityUntimedArcs: # not already considered this arc
                     usedUntimedArcs.append(untimedArc)
+    
     if len(usedUntimedArcs) > 0:
         didAddVIConstraints = True
         print(len(usedUntimedArcs))
-    for arc in usedUntimedArcs:
+    
+    for arc in usedUntimedArcs: # (group, orderSequence, r2)
         validInequalityUntimedArcs.append(arc)
         if arc[1] != (): # not an entry arc, do predecessor valid inequalities
             validPredecessorUntimedArcs = []
-            if arc[2] == 0: # is a going-home arc
-                latestLeavingTime = sequenceData[arc[1]][2]
-            else:
-                latestLeavingTime = sequenceNextRestaurantData[(arc[1:])][2]
-            for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], untimedArcData[arc][0])]:
-                if untimedArc[1] != (): # not a coming-from-home arc
-                    if sequenceNextRestaurantData[(untimedArc[1:])][1] + sequenceNextRestaurantData[(untimedArc[1:])][3] <= latestLeavingTime:
-                        validPredecessorUntimedArcs.append(untimedArc)
-                else: # coming-from-home arc
-                    soonestArrivalTime = min(TravelTime(courierData[courier],restaurantData[untimedArc[2]])+courierData[courier][2] for courier in courierGroups[arc[0]][0]) + pickupServiceTime / 2
-                    if soonestArrivalTime <= latestLeavingTime:
-                        validPredecessorUntimedArcs.append(untimedArc)
+            latestLeavingTime = untimedArcData[arc][2]
+            for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], arc[2])]:
+                if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
+                    validPredecessorUntimedArcs.append(untimedArc)
             m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
                         <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
                                     for untimedArc in validPredecessorUntimedArcs))
+    
+        if arc[2] != 0: # not an exit arc, do successor valid inequalities
+            validSuccessorUntimedArcs = []
+            earliestArrivalTime = untimedArcData[arc][1] + untimedArcData[arc][3]
+            for untimedArc in untimedArcsByCourierRestaurant[(arc[0], untimedArcData[arc][0])]:
+                if untimedArcData[untimedArc][3] >= earliestArrivalTime:
+                    validSuccessorUntimedArcs.append(untimedArc)
+            m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+                        <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
+                                    for untimedArc in validSuccessorUntimedArcs))
 
 print('Time = ' + str(time() - programStartTime))
