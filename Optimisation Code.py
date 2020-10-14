@@ -30,6 +30,8 @@ Created on Thu Aug  6 15:43:43 2020
 # TODO: Properly remove duplicate on-off arcs
 # TODO: Properly remove arcs that go to the same node as they left
 # TODO: Remove or formalise home -> home arcs
+# TODO: Add the option to choose between global times for nodes, or have individual times for each restaurant/courier pair
+# TODO: Revise code to ensure correctness
 
 import math
 from collections import defaultdict
@@ -40,9 +42,13 @@ import random
 
 from operator import lt, gt
 
-courierData = {} # x y ontime offtime
-orderData = {} # x y placementtime restaurant readytime latestLeavingTime maxClickToDoorArrivalTime
-restaurantData = {} # x y
+courierData = {} # courier: [x, y, ontime, offtime]
+orderData = {} # order: [x, y, placementtime, restaurant, readytime, latestLeavingTime, maxClickToDoorArrivalTime]
+restaurantData = {} # restaurant: [x, y]
+
+sequenceData = {} # orderSequence: [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
+sequenceNextRestaurantData = {} # (sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
+untimedArcData = {} # (courierGroup, sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 
 grubhubInstance = '0o50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
@@ -154,15 +160,14 @@ def RemoveDominatedSequences(sequences):
         del sequences[sequence]
     return sequences
 
-orderDeliverySequences = {} # orderSequence: [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
-sequenceNextRestaurantPairs = {} # (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
+# Calculate & dominate order sequences
 for restaurant in restaurantData:
     sequenceLength = 1
     calculatedSequences = {}
     for order in ordersAtRestaurant[restaurant]:
         calculatedSequences[(order,)] = [restaurant, orderData[order][4], orderData[order][5], TravelTime(restaurantData[restaurant], orderData[order]) + (pickupServiceTime + dropoffServiceTime) / 2]
     for sequence in calculatedSequences:
-        orderDeliverySequences[sequence] = calculatedSequences[sequence]
+        sequenceData[sequence] = calculatedSequences[sequence]
     while len(calculatedSequences) > 0:
         sequenceLength += 1
         newSequences = {}
@@ -170,59 +175,58 @@ for restaurant in restaurantData:
             for order in ordersAtRestaurant[restaurant]:
                 if order not in sequence:
                     newSequence = sequence + (order,)
-                    totalTravelTime = orderDeliverySequences[sequence][3] + dropoffServiceTime + TravelTime(orderData[sequence[-1]], orderData[order])
-                    latestLeavingTime = min(orderDeliverySequences[sequence][2], orderData[order][6] - totalTravelTime)
-                    earliestLeavingTime = max(orderDeliverySequences[sequence][1], orderData[order][4])
+                    totalTravelTime = sequenceData[sequence][3] + dropoffServiceTime + TravelTime(orderData[sequence[-1]], orderData[order])
+                    latestLeavingTime = min(sequenceData[sequence][2], orderData[order][6] - totalTravelTime)
+                    earliestLeavingTime = max(sequenceData[sequence][1], orderData[order][4])
                     if earliestLeavingTime <= latestLeavingTime:
                         newSequences[newSequence] = [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
         if sequenceLength >= 3:
             newSequences = RemoveDominatedSequences(newSequences)
         calculatedSequences = newSequences
         for sequence in calculatedSequences:
-            orderDeliverySequences[sequence] = calculatedSequences[sequence]
+            sequenceData[sequence] = calculatedSequences[sequence]
         if len(calculatedSequences) == 0:
             break
 
 sequencesByRestaurantThenOrderSet = {}
-for sequence in orderDeliverySequences:
-    restaurant = orderDeliverySequences[sequence][0]
+for sequence in sequenceData:
+    restaurant = sequenceData[sequence][0]
     if restaurant not in sequencesByRestaurantThenOrderSet:
         sequencesByRestaurantThenOrderSet[restaurant] = defaultdict(list)
     sequencesByRestaurantThenOrderSet[restaurant][frozenset(sequence)].append(sequence)
-GiveMeAStatusUpdate('delivery sequences', orderDeliverySequences)
+GiveMeAStatusUpdate('delivery sequences', sequenceData)
 
 def CheckDominationPairs(sequenceToCheck, nextRestaurant):
     dominatedSequences = []
     for sequence in groupedPairs[(frozenset(sequenceToCheck), nextRestaurant)]:
         if sequence != sequenceToCheck:
-            if CompareTwoIndices(lt, gt, sequenceNextRestaurantPairs, (sequenceToCheck, nextRestaurant), (sequence, nextRestaurant), 2, 3):
+            if CompareTwoIndices(lt, gt, sequenceNextRestaurantData, (sequenceToCheck, nextRestaurant), (sequence, nextRestaurant), 2, 3):
                 return [sequenceToCheck]
-            if CompareTwoIndices(gt, lt, sequenceNextRestaurantPairs, (sequenceToCheck, nextRestaurant), (sequence, nextRestaurant), 2, 3):
+            if CompareTwoIndices(gt, lt, sequenceNextRestaurantData, (sequenceToCheck, nextRestaurant), (sequence, nextRestaurant), 2, 3):
                 dominatedSequences.append(sequence)
     return dominatedSequences
 
-sequenceNextRestaurantPairs = {} # (sequence, nextRestaurant): [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
 groupedPairs = defaultdict(list) # (frozenset(sequence), nextRestaurant): [sequence1, sequence2, sequence3, ...]
-for sequence in orderDeliverySequences:
-    finishTime = orderDeliverySequences[sequence][1] + orderDeliverySequences[sequence][3]
+for sequence in sequenceData:
+    finishTime = sequenceData[sequence][1] + sequenceData[sequence][3]
     for restaurant in restaurantData:
         arrivalAtRestaurant = finishTime + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
         for order in ordersAtRestaurant[restaurant]:
             if orderData[order][5] > arrivalAtRestaurant:
-                travelTime = orderDeliverySequences[sequence][3] + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
-                sequenceNextRestaurantPairs[(sequence, restaurant)] = orderDeliverySequences[sequence][:3] + [travelTime]
+                travelTime = sequenceData[sequence][3] + TravelTime(orderData[sequence[-1]], restaurantData[restaurant]) + (dropoffServiceTime + pickupServiceTime) / 2
+                sequenceNextRestaurantData[(sequence, restaurant)] = sequenceData[sequence][:3] + [travelTime]
                 groupedPairs[(frozenset(sequence), restaurant)].append(sequence)
                 dominatedSequences = CheckDominationPairs(sequence, restaurant)
                 for dominatedSequence in dominatedSequences:
-                    del sequenceNextRestaurantPairs[(dominatedSequence, restaurant)]
+                    del sequenceNextRestaurantData[(dominatedSequence, restaurant)]
                     groupedPairs[(frozenset(sequence), restaurant)].remove(dominatedSequence)
                 break
-GiveMeAStatusUpdate('post-domination pairs', sequenceNextRestaurantPairs)
+GiveMeAStatusUpdate('post-domination pairs', sequenceNextRestaurantData)
 
 untimedArcs = set() # {(offTime1, sequence1, nextRestaurant1), (offTime2, sequence2, nextRestaurant2), ...}
 # Main untimedArcs
-for pair in sequenceNextRestaurantPairs:
-    leavingRestaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime = sequenceNextRestaurantPairs[pair]
+for pair in sequenceNextRestaurantData:
+    leavingRestaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime = sequenceNextRestaurantData[pair]
     earliestArrivalTime = earliestLeavingTime + totalTravelTime
     for group in courierGroups:
         offTime = courierGroups[group][1]
@@ -239,6 +243,7 @@ for pair in sequenceNextRestaurantPairs:
                             orderDatum = orderData[order]
                             if orderDatum[4] < courierDatum[3] and orderDatum[5] > earliestArrivalTime:
                                 untimedArcs.add((group,) + pair)
+                                untimedArcData[((group,) + pair)] = sequenceNextRestaurantData[pair]
                                 variableForOffTime = True
                                 break
                 if variableForOffTime:
@@ -246,8 +251,8 @@ for pair in sequenceNextRestaurantPairs:
 GiveMeAStatusUpdate('main untimedArcs', untimedArcs)
 # Exit untimedArcs
 # Create sequence-courier (off time) pairs, with nextRestaurant = 0
-for sequence in orderDeliverySequences:
-    restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime = orderDeliverySequences[sequence]
+for sequence in sequenceData:
+    restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime = sequenceData[sequence]
     for group in courierGroups:
         offTime = courierGroups[group][1]
         # off time after earliest ready time
@@ -259,6 +264,7 @@ for sequence in orderDeliverySequences:
                 if courierDatum[2] < latestLeavingTime: # added for hopefully a small speed-up?
                     if courierDatum[2] + TravelTime(courierDatum, restaurantData[restaurant]) + pickupServiceTime / 2 < latestLeavingTime:
                         untimedArcs.add((group, sequence, 0))
+                        untimedArcData[(group, sequence, 0)] = sequenceData[sequence]
                         break
 GiveMeAStatusUpdate('main + exit untimedArcs', untimedArcs)
 # Entry untimedArcs
@@ -271,14 +277,17 @@ for group in courierGroups:
                 for order in ordersAtRestaurant[restaurant]:
                     if orderData[order][5] > courierData[courier][2] and orderData[order][4] < courierData[courier][3]:
                         untimedArcs.add((group, (), restaurant))
+                        untimedArcData[(group, (), restaurant)] = [0, min(courierData[c][2] for c in courierGroups[group][0]), courierGroups[group][1], min(TravelTime(courierData[c],restaurantData[restaurant]) for c in courierGroups[group][0]) + pickupServiceTime / 2]
 GiveMeAStatusUpdate('all untimedArcs', untimedArcs)
 untimedArcsByCourierRestaurant = defaultdict(list)
 # (offTime, departureRestaurant): [(offTime, sequence1, nextRestaurant1), (offTime, sequence2, nextRestaurant2), ...]
+untimedArcsByCourierNextRestaurant = defaultdict(list)
 for arc in untimedArcs:
     if arc[1] == ():
         untimedArcsByCourierRestaurant[(arc[0], 0)].append(arc)
     else:
         untimedArcsByCourierRestaurant[(arc[0], orderData[arc[1][0]][3])].append(arc)
+    untimedArcsByCourierNextRestaurant[(arc[0], arc[2])].append(arc)
 
 nodesInModel = set()
 # {(offTime1, restaurant1, time1), (offTime2, restaurant2, time2), ...}
@@ -319,7 +328,7 @@ for pair in untimedArcsByCourierRestaurant:
             sequence = arc[1]
             nextRestaurant = arc[2]
             if nextRestaurant != 0:
-                earliestDepartureTime, latestDepartureTime, travelTime = sequenceNextRestaurantPairs[(sequence, nextRestaurant)][1:]
+                earliestDepartureTime, latestDepartureTime, travelTime = sequenceNextRestaurantData[(sequence, nextRestaurant)][1:]
                 earliestArrivalTime = earliestDepartureTime + travelTime
                 latestArrivalTime = latestDepartureTime + travelTime
                 nodesForArrivingPair = nodesByOfftimeRestaurantPair[pair[0], nextRestaurant]
@@ -365,11 +374,11 @@ for pair in nodesByOfftimeRestaurantPair:
     if len(nodesByOfftimeRestaurantPair[pair]) > 0 and pair[1] != 0:
         for orderSet in sequencesByRestaurantThenOrderSet[pair[1]]:
             sequences = sequencesByRestaurantThenOrderSet[pair[1]][orderSet]
-            latestLeavingTime = max(orderDeliverySequences[sequence][2] for sequence in sequences)
+            latestLeavingTime = max(sequenceData[sequence][2] for sequence in sequences)
             if min(node[2] for node in nodesByOfftimeRestaurantPair[pair]) > latestLeavingTime: continue
             latestLeavingNodeTime = max(node[2] for node in nodesByOfftimeRestaurantPair[pair] if node[2] < latestLeavingTime)
             for sequence in sequences:
-                if orderDeliverySequences[sequence][2] >= latestLeavingNodeTime:
+                if sequenceData[sequence][2] >= latestLeavingNodeTime:
                     timedArcs.add((pair[0], pair[1], latestLeavingNodeTime, sequence, 0, globalOffTime))
 GiveMeAStatusUpdate('timed arcs', timedArcs)
 
@@ -377,16 +386,20 @@ print()
 m = Model('MDRP')
 m.setParam('Method', 2)
 
-arcsByDepartureNode = defaultdict(list)
-arcsByArrivalNode = defaultdict(list)
-arcsByCourier = defaultdict(list)
+arcsByDepartureNode = defaultdict(list) # (c,r1,t1): [timedArc1, timedArc2, ...]
+arcsByArrivalNode = defaultdict(list) # (c,r2,t2): [timedArc1, timedArc2, ...]
+arcsByCourier = defaultdict(list) # c: [timedArc1, timedArc2, ...]
 arcsByOrder = {o:[] for o in orderData}
 outArcsByCourier = defaultdict(list)
+departureArcsByCourierAndRestaurant = defaultdict(list) # (c,r1): [timedArc1, timedArc2, ...]
+arrivalArcsByCourierAndRestaurant = defaultdict(list) # (c,r2): [timedArc1, timedArc2, ...]
+arcsByUntimedArc = defaultdict(list)
 for arc in timedArcs:
     (c,r1,t1,s,r2,t2) = arc
     if t2 > t1: # This condition is a hacky solution to the existence of incorrect arcs
         if r1:
             arcsByDepartureNode[(c,r1,t1)].append(arc)
+            departureArcsByCourierAndRestaurant[(c,r1)].append(arc)
         else:
             if t1 == 0 and r2 != 0:
                 if s != ():
@@ -394,9 +407,11 @@ for arc in timedArcs:
                 outArcsByCourier[c].append(arc)
         if r2:
             arcsByArrivalNode[(c,r2,t2)].append(arc)
+            arrivalArcsByCourierAndRestaurant[(c,r2)].append(arc)
         arcsByCourier[c].append(arc)
         for o in arc[3]:
             arcsByOrder[o].append(arc)
+        arcsByUntimedArc[(c,r1,s,r2)].append(arc)
 
 arcs = {arc: m.addVar() for arc in timedArcs if arc[2] < arc[5]}
 GiveMeAStatusUpdate('arcs', arcs)
@@ -446,9 +461,9 @@ GiveMeAStatusUpdate('courier payments per time', paidPerTime)
 #             earliestDepartureTime = earliestArrivalTime - durationOfTravel
 #             latestDepartureTime = courierGroups[group][1] - durationOfTravel
 #         elif arrivalRestaurant == 0:
-#             _, earliestDepartureTime, latestDepartureTime, durationOfTravel = orderDeliverySequences[orderSequence]
+#             _, earliestDepartureTime, latestDepartureTime, durationOfTravel = sequenceData[orderSequence]
 #         else:
-#             _, earliestDepartureTime, latestDepartureTime, durationOfTravel = sequenceNextRestaurantPairs[orderSequence, arrivalRestaurant]
+#             _, earliestDepartureTime, latestDepartureTime, durationOfTravel = sequenceNextRestaurantData[orderSequence, arrivalRestaurant]
 #         arcStats[newArc] = (departureRestaurant, earliestDepartureTime, latestDepartureTime, durationOfTravel, arrivalRestaurant)
 #     arcsWithTheirPredecessors = defaultdict(list)
 #     arcsWithTheirSuccessors = defaultdict(list)
@@ -499,5 +514,36 @@ GiveMeAStatusUpdate('courier payments per time', paidPerTime)
 #     return didAddNewConstraints
 
 m.optimize()
+# didAddVIConstraints = True
+# validInequalityUntimedArcs = []
+# while didAddVIConstraints:
+#     didAddVIConstraints = False
+#     m.optimize()
+#     usedUntimedArcs = [] # (courierGroup, r1, orderSequence, r2)
+#     for arc in arcs:
+#         if arcs[arc].x > 0.001: # arc was turned on
+#             if arc[1] != arc[4] or arc[3] != (): # not a waiting arc
+#                 if arc not in validInequalityUntimedArcs: # not already considered this arc
+#                     usedUntimedArcs.append((arc[0], arc[1], arc[3], arc[4]))
+#     if len(usedUntimedArcs) > 0:
+#         didAddVIConstraints = True
+#     for arc in usedUntimedArcs:
+#         if arc[1] != 0: # not an entry arc, do predecessor valid inequalities
+#             validPredecessorUntimedArcs = []
+#             if arc[3] == 0:
+#                 latestLeavingTime = sequenceData[arc[2]][2]
+#             else:
+#                 latestLeavingTime = sequenceNextRestaurantData[(arc[2], arc[3])][2]
+#             for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], arc[1])]:
+#                 if untimedArc[1] != ():
+#                     if sequenceNextRestaurantData[(untimedArc[1:])][1] + sequenceNextRestaurantData[(untimedArc[1:])][3] <= latestLeavingTime:
+#                         validPredecessorUntimedArcs.append(untimedArc)
+#                 else:
+#                     soonestArrivalTime = min(TravelTime(courierData[courier],restaurantData[arc[1]])+courierData[courier][2] for courier in courierGroups[arc[0]][0]) + pickupServiceTime / 2
+#                     if soonestArrivalTime <= latestLeavingTime:
+#                         validPredecessorUntimedArcs.append(untimedArc)
+#             m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+#                         <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
+#                                     for untimedArc in validPredecessorUntimedArcs))
 
 print('Time = ' + str(time() - programStartTime))
