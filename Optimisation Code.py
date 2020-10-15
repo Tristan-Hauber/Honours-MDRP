@@ -20,7 +20,7 @@ Created on Thu Aug  6 15:43:43 2020
 # Done: Add model constraints
 # Done: Solve linear model
 # TODO: Add valid inequality cuts in callback
-# TODO: Solve integer model
+# Done: Solve integer model
 # TODO: Add illegal path elimination constraints in callback
 
 # Improvements:
@@ -550,5 +550,13 @@ while didAddVIConstraints:
             m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
                         <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
                                     for untimedArc in validSuccessorUntimedArcs))
+
+print('Time = ' + str(time() - programStartTime))
+
+for arc in arcs:
+    if arc[3] != ():
+        arcs[arc].vtype=GRB.BINARY
+
+m.optimize()
 
 print('Time = ' + str(time() - programStartTime))
