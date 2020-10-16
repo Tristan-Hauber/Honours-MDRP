@@ -19,7 +19,7 @@ Created on Thu Aug  6 15:43:43 2020
 # Done: Add model variables
 # Done: Add model constraints
 # Done: Solve linear model
-# TODO: Add valid inequality cuts in callback
+# Done: Add valid inequality cuts
 # Done: Solve integer model
 # TODO: Add illegal path elimination constraints in callback
 
@@ -30,7 +30,6 @@ Created on Thu Aug  6 15:43:43 2020
 # TODO: Properly remove duplicate on-off arcs
 # TODO: Properly remove arcs that go to the same node as they left
 # TODO: Remove or formalise home -> home arcs
-# TODO: Add the option to choose between global times for nodes, or have individual times for each restaurant/courier pair
 # TODO: Revise code to ensure correctness
 # TODO: Add starting arcs *for each courier*, not just every group
 # TODO: Use the new arcs to better approximate objective function: pay >= deliveryPayments + timePeriod * couriersWhoDontDeliverAtAll
@@ -60,6 +59,7 @@ nodeTimeInterval = 8 # minutes between nodes
 groupCouriersByOffTime = True
 orderProportion = 1
 seed = 0
+globalNodeIntervals = False
 
 def WithoutLetters(string):
     return string.translate({ord(i): None for i in 'abcdefghijklmnopqrstuvwxyz'})
@@ -295,23 +295,37 @@ for arc in untimedArcs:
 
 nodesInModel = set()
 # {(offTime1, restaurant1, time1), (offTime2, restaurant2, time2), ...}
-for group in courierGroups:
-    offTime = courierGroups[group][1]
-    for restaurant in restaurantData:
-        earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 for courier in courierGroups[group][0])
-        if earliestArrivalTime > offTime:
-            continue
-        deliverableOrders = set(order for order in ordersAtRestaurant[restaurant] if orderData[order][4] < offTime and orderData[order][5] > earliestArrivalTime)
-        if len(deliverableOrders) == 0:
-            continue
-        latestNodeTime = min(max(orderData[order][5] for order in deliverableOrders), offTime)
-        earliestNodeTime = max(min(orderData[order][4] for order in deliverableOrders), earliestArrivalTime)
-        if earliestNodeTime > latestNodeTime:
-            print('error!', group, restaurant, earliestNodeTime, latestNodeTime, earliestArrivalTime)
-        currentTime = earliestNodeTime
-        while currentTime < latestNodeTime:
-            nodesInModel.add((group, restaurant, currentTime))
-            currentTime += nodeTimeInterval
+if globalNodeIntervals:
+    nodeTimes = list(nodeTimeInterval * i for i in range(globalOffTime // nodeTimeInterval + 1))
+    for group in courierGroups:
+        groupOffTime = courierGroups[group][1]
+        for restaurant in restaurantData:
+            earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) for courier in courierGroups[group][0]) + pickupServiceTime / 2
+            deliverableOrders = list(order for order in ordersAtRestaurant[restaurant] if orderData[order][4] <= groupOffTime if orderData[order][5] >= earliestArrivalTime)
+            if len(deliverableOrders) > 0:
+                latestAllowedDeparture = min(max(orderData[order][5] for order in deliverableOrders), groupOffTime)
+                earliestAllowedDeparture = max(min(orderData[order][4] for order in deliverableOrders), earliestArrivalTime)
+                for nodeTime in nodeTimes:
+                    if nodeTime <= latestAllowedDeparture and nodeTime > earliestAllowedDeparture - nodeTimeInterval:
+                        nodesInModel.add((group, restaurant, nodeTime))
+else:
+    for group in courierGroups:
+        offTime = courierGroups[group][1]
+        for restaurant in restaurantData:
+            earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2 for courier in courierGroups[group][0])
+            if earliestArrivalTime > offTime:
+                continue
+            deliverableOrders = set(order for order in ordersAtRestaurant[restaurant] if orderData[order][4] < offTime and orderData[order][5] > earliestArrivalTime)
+            if len(deliverableOrders) == 0:
+                continue
+            latestNodeTime = min(max(orderData[order][5] for order in deliverableOrders), offTime)
+            earliestNodeTime = max(min(orderData[order][4] for order in deliverableOrders), earliestArrivalTime)
+            if earliestNodeTime > latestNodeTime:
+                print('error!', group, restaurant, earliestNodeTime, latestNodeTime, earliestArrivalTime)
+            currentTime = earliestNodeTime
+            while currentTime < latestNodeTime:
+                nodesInModel.add((group, restaurant, currentTime))
+                currentTime += nodeTimeInterval
 GiveMeAStatusUpdate('nodes generated', nodesInModel)
 for group in courierGroups:
     offTime = courierGroups[group][1]
@@ -568,8 +582,6 @@ while True:
         break
 
 print('Time = ' + str(time() - programStartTime))
-
-m.setParam('Method', 0)
 
 for arc in arcs:
     if arc[3] != ():
