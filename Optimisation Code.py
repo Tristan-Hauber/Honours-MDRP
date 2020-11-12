@@ -37,6 +37,7 @@ Created on Thu Aug  6 15:43:43 2020
 # TODO: Confirm that VI cuts aren't causing a problem
 # TODO: Add an entry untimed arc for every courier, not just every group
 # TODO: Find out why non-global node times is infeasible
+# TODO: Add domination of timed arcs with the same end time
 
 
 
@@ -168,7 +169,6 @@ if orderProportion < 1.0:
     print('Now at ' + str(len(orderData)) + ' orders, down from ' + str(totalOrderCount))
     print()
         
-
 
 
 
@@ -334,6 +334,8 @@ untimedArcs = set() # {(offTime1, sequence1, nextRestaurant1), (offTime2, sequen
 # 4. the arrival at the next restaurant is before the group's off time
 # 5. there is at least one order at the next restaurant that is deliverable between the courier's arrival and the group's off time
 # 6. the earliest leaving time plus the travel time is before the group's off time (less refined version of 4)
+# The courier must leave in time to deliver its orders, as well as in time to
+# deliver an order at the next restaurant.
 for sequence, nextRestaurant in sequenceNextRestaurantData:
     restaurant, earliestLeavingTime, latestLeavingTime, travelTime = sequenceNextRestaurantData[sequence, nextRestaurant]
     for group in courierGroups:
@@ -364,7 +366,7 @@ for sequence, nextRestaurant in sequenceNextRestaurantData:
                                     bestOrderLatestLeavingTime = orderData[order][5]
                     if foundValidOrder: # check condition 5
                         latestArrivalAtNextRestaurant = min(bestOrderLatestLeavingTime, offTime)
-                        latestDepartureAtDepartureRestaurant = latestArrivalAtNextRestaurant - travelTime
+                        latestDepartureAtDepartureRestaurant = min(latestArrivalAtNextRestaurant - travelTime, latestLeavingTime)
                         if latestDepartureAtDepartureRestaurant < earliestDepartureFromDepartureRestaurant:
                             print('Main untimed arc error 2!', str(group), str(sequence), str(nextRestaurant))
                         untimedArcs.add((group, sequence, nextRestaurant))
@@ -530,37 +532,43 @@ timedArcs = set()
 # time2 is a function of time1, orderSequence, restaurant2
 for (g, s, r2) in untimedArcData:
     if s != ():
-        offTime = courierGroups[g][1]
         r1, earliestLeavingTime, latestLeavingTime, travelTime = untimedArcData[g,s,r2]
-        nodeTimesAtLeavingRestaurant = nodeTimesByCourierRestaurant[(g, r1)]
-        nodeTimesAtArrivingRestaurant = nodeTimesByCourierRestaurant[(g, r2)]
-        nodeTimesAtLeavingRestaurant.sort()
-        nodeTimesAtArrivingRestaurant.sort()
-        if min(nodeTimesAtLeavingRestaurant) <= earliestLeavingTime:
-            firstArcLeavingTime = max(i for i in nodeTimesAtLeavingRestaurant if i <= earliestLeavingTime)
-        else:
-            if min(nodeTimesAtLeavingRestaurant) > latestLeavingTime:
-                break
+        if r2 != 0:
+            offTime = courierGroups[g][1]
+            nodeTimesAtLeavingRestaurant = nodeTimesByCourierRestaurant[(g, r1)]
+            nodeTimesAtArrivingRestaurant = nodeTimesByCourierRestaurant[(g, r2)]
+            nodeTimesAtLeavingRestaurant.sort()
+            nodeTimesAtArrivingRestaurant.sort()
+            if min(nodeTimesAtLeavingRestaurant) <= earliestLeavingTime:
+                firstArcLeavingTime = max(i for i in nodeTimesAtLeavingRestaurant if i <= earliestLeavingTime)
             else:
-                firstArcLeavingTime = min(nodeTimesAtLeavingRestaurant)
-        currentNodeTime = firstArcLeavingTime
-        while currentNodeTime <= latestLeavingTime:
-            arrivalAtNextRestaurant = max(currentNodeTime, earliestLeavingTime) + travelTime
-            if r2 != 0:
-                if arrivalAtNextRestaurant > max(nodeTimesAtArrivingRestaurant):
+                if min(nodeTimesAtLeavingRestaurant) > latestLeavingTime:
                     break
-                potentialArrivalTimes = []
-                for nodeTime in nodeTimesAtArrivingRestaurant:
-                    if nodeTime <= arrivalAtNextRestaurant and nodeTime > currentNodeTime:
-                        potentialArrivalTimes.append(nodeTime)
-                if len(potentialArrivalTimes) > 0:
-                    arrivalNodeTime = max(potentialArrivalTimes)
                 else:
-                    arrivalNodeTime = min(i for i in nodeTimesAtArrivingRestaurant if i > currentNodeTime)
-            else:
-                arrivalNodeTime = globalOffTime
-            timedArcs.add((g, r1, currentNodeTime, s, r2, arrivalNodeTime))
-            currentNodeTime += nodeTimeInterval
+                    firstArcLeavingTime = min(nodeTimesAtLeavingRestaurant)
+            currentNodeTime = firstArcLeavingTime
+            while currentNodeTime <= latestLeavingTime:
+                arrivalAtNextRestaurant = max(currentNodeTime, earliestLeavingTime) + travelTime
+                if arrivalAtNextRestaurant > max(nodeTimesAtArrivingRestaurant):
+                    if max(nodeTimesAtArrivingRestaurant) < currentNodeTime:
+                        print('Error: timed arc going backwards in time!', str((g,s,r2)), str(currentNodeTime))
+                        break
+                    else:
+                        arrivalNodeTime = max(nodeTimesAtArrivingRestaurant)
+                else:
+                    potentialArrivalTimes = []
+                    for nodeTime in nodeTimesAtArrivingRestaurant:
+                        if nodeTime <= arrivalAtNextRestaurant and nodeTime > currentNodeTime:
+                            potentialArrivalTimes.append(nodeTime)
+                    if len(potentialArrivalTimes) > 0:
+                        arrivalNodeTime = max(potentialArrivalTimes)
+                    else:
+                        arrivalNodeTime = min(i for i in nodeTimesAtArrivingRestaurant if i > currentNodeTime)
+                timedArcs.add((g, r1, currentNodeTime, s, r2, arrivalNodeTime))
+                currentNodeTime += nodeTimeInterval
+        else:
+            leavingNodeTime = max(t for t in nodeTimesByCourierRestaurant[(g,r1)] if t <= latestLeavingTime)
+            timedArcs.add((g, r1, leavingNodeTime, s, 0, globalOffTime))
     else:
         arrivalNodeTime = min(nodeTimesByCourierRestaurant[(g, r2)])
         timedArcs.add((g, 0, 0, (), r2, arrivalNodeTime))
@@ -584,14 +592,6 @@ GiveMeAStatusUpdate('timed arcs', timedArcs)
 
 
 
-print()
-m = Model('MDRP')
-m.setParam('Method', 2)
-
-
-
-
-
 arcsByDepartureNode = defaultdict(list) # (c,r1,t1): [timedArc1, timedArc2, ...]
 arcsByArrivalNode = defaultdict(list) # (c,r2,t2): [timedArc1, timedArc2, ...]
 arcsByCourier = defaultdict(list) # c: [timedArc1, timedArc2, ...]
@@ -601,10 +601,6 @@ departureArcsByCourierAndRestaurant = defaultdict(list) # (c,r1): [timedArc1, ti
 arrivalArcsByCourierAndRestaurant = defaultdict(list) # (c,r2): [timedArc1, timedArc2, ...]
 arcsByUntimedArc = {u: [] for u in untimedArcData}
 waitingArcsByGroupRestaurant = defaultdict(list)
-
-
-
-
 
 for arc in timedArcs:
     (c,r1,t1,s,r2,t2) = arc
@@ -622,16 +618,30 @@ for arc in timedArcs:
     if r1 == r2 and s == ():
         waitingArcsByGroupRestaurant[c,r1].append(arc)
 
-
-
-
-
 arcsByDepartureNode = dict(arcsByDepartureNode)
 arcsByArrivalNode = dict(arcsByArrivalNode)
 arcsByCourier = dict(arcsByCourier)
 departureArcsByCourierAndRestaurant = dict(departureArcsByCourierAndRestaurant)
 arrivalArcsByCourierAndRestaurant = dict(arrivalArcsByCourierAndRestaurant)
 waitingArcsByGroupRestaurant = dict(waitingArcsByGroupRestaurant)
+
+for order in arcsByOrder:
+    if len(arcsByOrder[order]) == 0:
+        print('Error: No timed arcs deliver order ' + str(order) + '!')
+for group in outArcsByCourier:
+    if len(outArcsByCourier[group]) == 0:
+        print('Error: Group ' + str(group) + 'has no entry arcs!')
+for untimedArc in arcsByUntimedArc:
+    if len(arcsByUntimedArc[untimedArc]) == 0:
+        print('Error: Untimed arc ' + str(untimedArc) + ' has no matching timed arcs!')
+
+
+
+
+
+print()
+m = Model('MDRP')
+m.setParam('Method', 2)
 
 
 
@@ -689,9 +699,8 @@ for arc in untimedArcs:
                 validPredecessorUntimedArcs.append(untimedArc)
         if len(validPredecessorUntimedArcs) == 0:
             print('No predecessor arcs', arc)
-        VIConstraints[(0,arc,tuple(validPredecessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                    <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
-                                for untimedArc in validPredecessorUntimedArcs))
+        VIConstraints[(-1,arc,tuple(validPredecessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+                    <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
     if arc[2] != 0: # not an exit arc, do successor valid inequalities
         validSuccessorUntimedArcs = []
         _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
@@ -703,171 +712,191 @@ for arc in untimedArcs:
         if len(validSuccessorUntimedArcs) == 0:
             print('No successor arcs', arc)
         VIConstraints[(1,arc,tuple(validSuccessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                    <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
-                                for untimedArc in validSuccessorUntimedArcs))
+                    <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
 GiveMeAStatusUpdate('VI Constraints', VIConstraints)
+m.optimize()
 
 
 
 
-# Code for removing broken VIs:
-extraConstraints = {}
-constraintDict = {}
-t = 0
-while True:
-    constraintsAdded = 0
-    m.optimize()
-    usedUntimedArcs = [] # (courierGroup, orderSequence, r2)
-    for arc in arcs:
-        if arcs[arc].x > 0.001: # arc was turned on
-            if arc[1] != arc[4] or arc[3] != (): # not a waiting arc
-                untimedArc = (arc[0], arc[3], arc[4])
-                usedUntimedArcs.append(untimedArc)
-    print()
-    print(str(len(usedUntimedArcs)) + ' total arcs used')
-    # eventually move the following into a function to go after the generation of 'usedUntimedArcs'?
-    for arc in usedUntimedArcs: # (group, orderSequence, r2)
-        if arc[1] != (): # not an entry arc, do predecessor valid inequalities
-            validPredecessorUntimedArcs = []
-            leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
-            for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
-                if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
-                    if set(arc[1]) & set(untimedArc[1]) != set():
-                        continue
-                    validPredecessorUntimedArcs.append(untimedArc)
-            if len(validPredecessorUntimedArcs) == 0:
-                print('No predecessor arcs', arc)
-            if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
-                > sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[untimedArc]
-                    for untimedArc in validPredecessorUntimedArcs) + 0.01:
-                constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                            <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
-                                        for untimedArc in validPredecessorUntimedArcs))
-                extraConstraints[t] = [1, arc, validPredecessorUntimedArcs]
-                constraintsAdded += 1
-                t += 1
-        if arc[2] != 0: # not an exit arc, do successor valid inequalities
-            validSuccessorUntimedArcs = []
-            _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
-            for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
-                if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
-                    if set(arc[1]) & set(untimedArc[1]) != set():
-                        continue
-                    validSuccessorUntimedArcs.append(untimedArc)
-            if len(validSuccessorUntimedArcs) == 0:
-                print('No successor arcs', arc)
-            if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
-                > sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[untimedArc]
-                    for untimedArc in validSuccessorUntimedArcs) + 0.01:
-                constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                            <= quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[untimedArc]
-                                        for untimedArc in validSuccessorUntimedArcs))
-                extraConstraints[t] = [2, arc, validSuccessorUntimedArcs]
-                constraintsAdded += 1
-                t += 1
-    if constraintsAdded > 0:
-        print('Added ' + str(constraintsAdded) + ' valid inequality constraints')
-        print()
-    else:
-        print('No valid inequality constraints added')
-        print()
-        break
+# # Code for removing broken VIs:
+# extraConstraints = {}
+# constraintDict = {}
+# t = 0
+# while True:
+#     constraintsAdded = 0
+#     m.optimize()
+#     usedUntimedArcs = [] # (courierGroup, orderSequence, r2)
+#     for arc in arcs:
+#         if arcs[arc].x > 0.001: # arc was turned on
+#             if arc[1] != arc[4] or arc[3] != (): # not a waiting arc
+#                 untimedArc = (arc[0], arc[3], arc[4])
+#                 usedUntimedArcs.append(untimedArc)
+#     print()
+#     print(str(len(usedUntimedArcs)) + ' total arcs used')
+#     # eventually move the following into a function to go after the generation of 'usedUntimedArcs'?
+#     for arc in usedUntimedArcs: # (group, orderSequence, r2)
+#         if arc[1] != (): # not an entry arc, do predecessor valid inequalities
+#             validPredecessorUntimedArcs = []
+#             leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
+#             for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
+#                 if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
+#                     if set(arc[1]) & set(untimedArc[1]) != set():
+#                         continue
+#                     validPredecessorUntimedArcs.append(untimedArc)
+#             if len(validPredecessorUntimedArcs) == 0:
+#                 print('No predecessor arcs', arc)
+#             if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
+#                 > sum(arcs[timedArc].x for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
+#                 constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+#                             <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
+#                 extraConstraints[t] = [1, arc, validPredecessorUntimedArcs]
+#                 constraintsAdded += 1
+#                 t += 1
+#         if arc[2] != 0: # not an exit arc, do successor valid inequalities
+#             validSuccessorUntimedArcs = []
+#             _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
+#             for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
+#                 if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
+#                     if set(arc[1]) & set(untimedArc[1]) != set():
+#                         continue
+#                     validSuccessorUntimedArcs.append(untimedArc)
+#             if len(validSuccessorUntimedArcs) == 0:
+#                 print('No successor arcs', arc)
+#             if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
+#                 > sum(arcs[timedArc].x for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
+#                 constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+#                             <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
+#                 extraConstraints[t] = [2, arc, validSuccessorUntimedArcs]
+#                 constraintsAdded += 1
+#                 t += 1
+#     if constraintsAdded > 0:
+#         print('Added ' + str(constraintsAdded) + ' valid inequality constraints')
+#         print()
+#     else:
+#         print('No valid inequality constraints added')
+#         print()
+#         break
 print('Time = ' + str(time() - programStartTime))
 
 
 
 
 
-# def ComputeAndRemoveIllegalPaths(listOfArcs, courierGroup):
-#     arcStats = {} # untimedArc: departureRestaurant, earliestDepartureTime, latestDepartureTime, durationOfTravel, arrivalRestaurant
-#     for timedArc in listOfArcs:
-#         _, departureRestaurant, _, orderSequence, arrivalRestaurant, _ = timedArc
-#         newArc = (departureRestaurant, orderSequence, arrivalRestaurant)
-#         if departureRestaurant == 0:
-#             earliestArrivalTime = min(courierData[courier][2] + TravelTime(courierData[courier], restaurantData[arrivalRestaurant]) for courier in courierGroups[courierGroup][0]) + pickupServiceTime / 2
-#             durationOfTravel = min(TravelTime(courierData[courier], restaurantData[arrivalRestaurant]) for courier in courierGroups[courierGroup][0]) + pickupServiceTime / 2
-#             earliestDepartureTime = earliestArrivalTime - durationOfTravel
-#             latestDepartureTime = courierGroups[group][1] - durationOfTravel
-#         elif arrivalRestaurant == 0:
-#             _, earliestDepartureTime, latestDepartureTime, durationOfTravel = sequenceData[orderSequence]
-#         else:
-#             _, earliestDepartureTime, latestDepartureTime, durationOfTravel = sequenceNextRestaurantData[orderSequence, arrivalRestaurant]
-#         arcStats[newArc] = (departureRestaurant, earliestDepartureTime, latestDepartureTime, durationOfTravel, arrivalRestaurant)
-#     arcsWithTheirPredecessors = defaultdict(list)
-#     arcsWithTheirSuccessors = defaultdict(list)
-#     for arc1, arc2 in itertools.combinations(arcStats, 2):
-#         if arcStats[arc1][1] + arcStats[arc1][3] <= arcStats[arc2][2]: # arc1 arrive before arc2 leaves
-#             if arcStats[arc1][4] == arcStats[arc2][0]: # arc1 arrival restaurant is arc2 departure restaurant
-#                 arcsWithTheirPredecessors[arc2].append(arc1) # arc1 is a predecessor of arc2
-#                 arcsWithTheirSuccessors[arc1].append(arc2)
-#         if arcStats[arc2][1] + arcStats[arc2][3] <= arcStats[arc1][2]:
-#             if arcStats[arc2][4] == arcStats[arc2][0]:
-#                 arcsWithTheirPredecessors[arc1].append(arc2)
-#                 arcsWithTheirSuccessors[arc2].append(arc1)
-#     arcsWithTheirPredecessors = dict(arcsWithTheirPredecessors)
-#     arcsWithTheirSuccessors = dict(arcsWithTheirSuccessors)
+def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
+    # Take the list of timed arcs, and convert them to untimed arcs
+    usedUntimedArcs = []
+    for (g, _, _, s, r2, _) in listOfTimedArcs:
+        untimedArc = (g, s, r2)
+        if untimedArc in usedUntimedArcs:
+            print('Error! Duplicate use of untimed arc in solution!')
+        usedUntimedArcs.append(untimedArc)
     
-#     IPD = Model('Illegal Path Determination')
-#     X = {(arc,successor): IPD.addVar(vtype=GRB.BINARY) for arc in arcsWithTheirSuccessors for successor in arcsWithTheirSuccessors[arc]}
-#     T = {arc: IPD.addVar() for arc in arcStats}
-#     leaveAfterEarlyTime = {arc: IPD.addConstr(T[arc] >= arcStats[arc][1]) for arc in arcStats}
-#     leaveBeforeLateTime = {arc: IPD.addConstr(T[arc] <= arcStats[arc][2]) for arc in arcStats}
-#     enoughTimeForBothArcs = {(i,j): IPD.addConstr(T[i]+arcStats[i][3] <= T[j]+(arcStats[i][2]+arcStats[i][3]-arcStats[j][1])*(1-X[i,j])) for (i,j) in X}
-#     entryArcsUsedOnce = {i: IPD.addConstr(quicksum(X[i,j] for j in arcsWithTheirSuccessors[i]) == 1) for i in arcsWithTheirSuccessors}
-#     exitArcsUsedOnce = {j: IPD.addConstr(quicksum(X[i,j] for i in arcsWithTheirPredecessors[j]) == 1) for j in arcsWithTheirPredecessors}
-#     IPD.optimize()
-#     if IPD.Status == GRB.INFEASIBLE:
-#         IPD.computeIIS()
-#         IISArcs = set()
-#         for arc in leaveAfterEarlyTime:
-#             if leaveAfterEarlyTime[arc].IISConstr:
-#                 IISArcs.add(arc)
-#         for arc in leaveBeforeLateTime:
-#             if leaveBeforeLateTime[arc].IISConstr:
-#                 IISArcs.add(arc)
-#         for arc in entryArcsUsedOnce:
-#             if entryArcsUsedOnce[arc].IISConstr:
-#                 IISArcs.add(arc)
-#         for arc in exitArcsUsedOnce:
-#             if exitArcsUsedOnce[arc].IISConstr:
-#                 IISArcs.add(arc)
-#         # IISArcs = set(k for k in leaveAfterEarlyTime if leaveAfterEarlyTime[k].IISConstr)
-#         # IISArcs.union(set(k for k in leaveBeforeLateTime if leaveBeforeLateTime[k].IISConstr))
-#         # IISArcs.union(set(k for k in entryArcsUsedOnce if entryArcsUsedOnce[k].IISConstr))
-#         # IISArcs.union(set(k for k in exitArcsUsedOnce if exitArcsUsedOnce[k].IISConstr))
-#         for (i,j) in enoughTimeForBothArcs:
-#             if enoughTimeForBothArcs[i,j].IISConstr:
-#                 IISArcs.add(i)
-#                 IISArcs.add(j)
-#         successorUntimedArcs = set()
-#         for arc in IISArcs:
-#             for potSuccessor in untimedArcsByCourierRestaurant[arc[0], arc[2]]:
-#                 if potSuccessor not in IISArcs and untimedArcData[potSuccessor][2] >= untimedArcData[arc][1] + untimedArcData[arc][3]:
-#                     successorUntimedArcs.add(potSuccessor)
-#         usedTimedArcs = []
-#         for arc in IISArcs:
-#             usedTimedArcs += arcsByUntimedArc[arc]
-#         timedArcSuccessors = []
-#         for arc in successorUntimedArcs:
-#             timedArcSuccessors += arcsByUntimedArc[arc]
-#         m.addConstr(quicksum(arc for arc in usedTimedArcs) <= len(usedTimedArcs) - 1 + quicksum(arc for arc in timedArcSuccessors))
-#         return True
-#     return False
+    # Find all possible predecessor-successor pairs
+    successorsForArc = defaultdict(list)
+    predecessorsForArc = defaultdict(list)
+    for (arc1, arc2) in itertools.combinations(usedUntimedArcs, 2):
+        arc1Data = untimedArcData[arc1]
+        arc2Data = untimedArcData[arc2]
+        if arc1Data[1] + arc1Data[3] <= arc2Data[2] and arc1[2] == arc2Data[0]:
+            successorsForArc[arc1].append(arc2)
+            predecessorsForArc[arc2].append(arc1)
+        if arc2Data[1] + arc2Data[3] <= arc1Data[2] and arc2[2] == arc1Data[0]:
+            successorsForArc[arc2].append(arc1)
+            predecessorsForArc[arc1].append(arc2)
+    successorsForArc = dict(successorsForArc)
+    predecessorsForArc = dict(predecessorsForArc)
+    
+    # Create a new model
+    IPD = Model('Illegal Path Determination')
+    X = {(arc, successor): IPD.addVar(vtype=GRB.BINARY) for arc in successorsForArc for successor in successorsForArc[arc]}
+    T = {arc: IPD.addVar() for arc in usedUntimedArcs}
+    
+    leaveAfterEarlyTime = {arc: IPD.addConstr(T[arc] >= untimedArcData[arc][1]) for arc in usedUntimedArcs}
+    leaveBeforeLateTime = {arc: IPD.addConstr(T[arc] <= untimedArcData[arc][2]) for arc in usedUntimedArcs}
+    enoughTimeForBothArcs = {(i,j): IPD.addConstr(T[i]+untimedArcData[i][3] <= T[j] + 
+                                  (untimedArcData[i][2]+untimedArcData[i][3]-untimedArcData[j][1])*(1-X[i,j]))
+                              for (i,j) in X}
+    predecessorArcsUsedOnce = {i: IPD.addConstr(quicksum(X[i,j] for j in successorsForArc[i]) == 1) for i in successorsForArc}
+    successorArcsUsedOnce = {j: IPD.addConstr(quicksum(X[i,j] for i in predecessorsForArc[j]) == 1) for j in predecessorsForArc}
+    
+    # Solve the model
+    IPD.optimize()
+    
+    # Compute IIS
+    if IPD.Status == GRB.INFEASIBLE:
+        IPD.computeIIS()
+    
+        # Compute Invalid Network
+        invalidUntimedArcs = set()
+        for arc in usedUntimedArcs:
+            if leaveAfterEarlyTime[arc].IISConstr or leaveBeforeLateTime[arc].IISConstr:
+                invalidUntimedArcs.add(arc)
+        for predecessor, successor in X:
+            if enoughTimeForBothArcs[predecessor, successor].IISConstr:
+                invalidUntimedArcs.add(predecessor)
+                invalidUntimedArcs.add(successor)
+            else:
+                if predecessorArcsUsedOnce[predecessor].IISConstr:
+                    invalidUntimedArcs.add(predecessor)
+                if successorArcsUsedOnce[successor].IISConstr:
+                    invalidUntimedArcs.add(successor)                    
+        
+        # Find possible replacement arcs
+        alternatePredecessorArcs = set()
+        alternateSuccessorArcs = set()
+        for arc in invalidUntimedArcs:
+            group, _, arrivalRestaurant = arc
+            departureRestaurant, earliestLeavingTime, latestLeavingTime, travelTime = untimedArcData[arc][0]
+            for untimedArc in untimedArcsByCourierNextRestaurant[group, departureRestaurant]:
+                if untimedArc not in usedUntimedArcs:
+                    # Finding predecessors. A valid predecessor will have earliest
+                    # arrival time before the arc has to leave
+                    earliestArrival = untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3]
+                    if earliestArrival <= latestLeavingTime:
+                        alternatePredecessorArcs.add(untimedArc)
+            
+            for untimedArc in untimedArcsByCourierRestaurant[group, arrivalRestaurant]:
+                if untimedArc not in usedUntimedArcs:
+                    # Finding successors. A valid successor will have latest leaving
+                    # time after the arc's earliest arrival
+                    earliestArrival = earliestLeavingTime + travelTime
+                    if earliestArrival <= untimedArcData[untimedArc][2]:
+                        alternateSuccessorArcs.add(untimedArc)
+        
+        # Remove Invalid Network
+        m.cbLazy(quicksum(timedArcs for timedArcs in arcsByUntimedArc[untimedArc] for untimedArc in invalidUntimedArcs)
+                 <= len(invalidUntimedArcs) - 1 + quicksum(timedArcs for untimedArc in alternatePredecessorArcs for timedArcs in arcsByUntimedArc[untimedArc]))
+        m.cbLazy(quicksum(timedArcs for timedArcs in arcsByUntimedArc[untimedArc] for untimedArc in invalidUntimedArcs)
+                 <= len(invalidUntimedArcs) - 1 + quicksum(timedArcs for untimedArc in alternateSuccessorArcs for timedArcs in arcsByUntimedArc[untimedArc]))
 
-# def RemoveInvalidRoutes():
-#     usedArcs = {arc: arcs[arc].x for arc in arcs if arcs[arc].x > 0 and (arc[3] != () or arc[1] == 0)}
-#     usedArcsByGroup = {g: [] for g in courierGroups}
-#     for arc in usedArcs:
-#         usedArcsByGroup[arc[0]].append(arc)
-#     didAddNewConstraints = False
-#     for group in courierGroups:
-#         didAddNewConstraints = didAddNewConstraints or ComputeAndRemoveIllegalPaths(usedArcsByGroup[group], group)
-#     return didAddNewConstraints
+def Callback(model, where):
+    if where == GRB.Callback.MIPSOL:
+        # print(model.cbGetSolution(model.vars))
+        timedArcValues = {arc: value for (arc, value) in zip(arcs.keys(), model.cbGetSolution(list(arcs.values())))}
+        usedTimedArcs = {arc: timedArcValues[arc] for arc in timedArcValues if timedArcValues[arc] > 0}
+        usedArcsByGroup = {group: [] for group in courierGroups}
+        for arc in usedTimedArcs:
+            if arc[3] != () or arc[1] == 0:
+                usedArcsByGroup[arc[0]].append(arc)
+        for group in usedArcsByGroup:
+            ComputeAndRemoveMinimalIllegalNetwork(usedArcsByGroup[group])
 
-# for arc in arcs:
-#     if arc[3] != ():
-#         arcs[arc].vtype=GRB.BINARY
+for arc in arcs:
+    if arc[3] != ():
+        arcs[arc].vtype=GRB.BINARY
 
-# m.optimize()
+for courier in doesThisCourierStart:
+    doesThisCourierStart[courier].vtype=GRB.BINARY
 
-# print('Time = ' + str(time() - programStartTime))
+m.setParam('Method', 0)
+m.optimize()
+
+print('Time = ' + str(time() - programStartTime))
+
+def FindIIS():
+    flowIIS = set(x for x in flowConstraint if flowConstraint[x].IISConstr)
+    orderIIS = set(x for x in deliverOrders if deliverOrders[x].IISConstr)
+    # VI_IIS = set(x for x in VIConstraints if VIConstraints[x].IISConstr)
+    # return {'Flow': flowIIS, 'Order': orderIIS, 'VI': VI_IIS}
+    return {'Flow': flowIIS, 'Order': orderIIS}
