@@ -24,7 +24,7 @@ Created on Thu Aug  6 15:43:43 2020
 # Done: Solve linear model
 # Done: Add valid inequality cuts
 # Done: Solve integer model
-# TODO: Add illegal path elimination constraints in callback
+# Done: Add illegal path elimination constraints in callback
 
 # Improvements:
 # TODO: Merge sequence-restaurant pair generation with sequence generation
@@ -37,7 +37,8 @@ Created on Thu Aug  6 15:43:43 2020
 # TODO: Confirm that VI cuts aren't causing a problem
 # TODO: Add an entry untimed arc for every courier, not just every group
 # TODO: Find out why non-global node times is infeasible
-# TODO: Add domination of timed arcs with the same end time
+# TODO: Ensure globalNodeIntervals = False works
+# TODO: Ensure groupCouriersByOffTime = False works
 
 
 
@@ -534,42 +535,70 @@ for (g, s, r2) in untimedArcData:
     if s != ():
         r1, earliestLeavingTime, latestLeavingTime, travelTime = untimedArcData[g,s,r2]
         if r2 != 0:
+            # only considering main arcs, that is, travel from restaurant to restaurant
             offTime = courierGroups[g][1]
             nodeTimesAtLeavingRestaurant = nodeTimesByCourierRestaurant[(g, r1)]
             nodeTimesAtArrivingRestaurant = nodeTimesByCourierRestaurant[(g, r2)]
             nodeTimesAtLeavingRestaurant.sort()
             nodeTimesAtArrivingRestaurant.sort()
+            
+            # find the first arc's leaving time - the largest node time that is before the earliest leaving time
             if min(nodeTimesAtLeavingRestaurant) <= earliestLeavingTime:
                 firstArcLeavingTime = max(i for i in nodeTimesAtLeavingRestaurant if i <= earliestLeavingTime)
             else:
+                print('Error: No early enough node time for arc conversion to timed arc!', arc)
                 if min(nodeTimesAtLeavingRestaurant) > latestLeavingTime:
                     break
                 else:
                     firstArcLeavingTime = min(nodeTimesAtLeavingRestaurant)
+            
+            # Add a timed arc for every departing node time valid for the untimed arc
+            # Start times increase by the nodeTimeInterval parameter
             currentNodeTime = firstArcLeavingTime
+            timedArcsToAdd = []
             while currentNodeTime <= latestLeavingTime:
                 arrivalAtNextRestaurant = max(currentNodeTime, earliestLeavingTime) + travelTime
-                if arrivalAtNextRestaurant > max(nodeTimesAtArrivingRestaurant):
-                    if max(nodeTimesAtArrivingRestaurant) < currentNodeTime:
-                        print('Error: timed arc going backwards in time!', str((g,s,r2)), str(currentNodeTime))
-                        break
-                    else:
-                        arrivalNodeTime = max(nodeTimesAtArrivingRestaurant)
+                # Two cases: there are nodes at the arriving restaurant around when the courier arrives, or not
+                if min(nodeTimesAtArrivingRestaurant) <= arrivalAtNextRestaurant:
+                    # Arrival node time is given by the latest node time at the restaurant, that is before the arrival time
+                    arrivalNodeTime = max(i for i in nodeTimesAtArrivingRestaurant if i <= arrivalAtNextRestaurant)
                 else:
-                    potentialArrivalTimes = []
-                    for nodeTime in nodeTimesAtArrivingRestaurant:
-                        if nodeTime <= arrivalAtNextRestaurant and nodeTime > currentNodeTime:
-                            potentialArrivalTimes.append(nodeTime)
-                    if len(potentialArrivalTimes) > 0:
-                        arrivalNodeTime = max(potentialArrivalTimes)
-                    else:
-                        arrivalNodeTime = min(i for i in nodeTimesAtArrivingRestaurant if i > currentNodeTime)
-                timedArcs.add((g, r1, currentNodeTime, s, r2, arrivalNodeTime))
+                    # Arrival node time is the earliest node time at the restaurant, that is after the arrival time
+                    arrivalNodeTime = min(nodeTimesAtArrivingRestaurant)
+                if arrivalNodeTime < currentNodeTime:
+                    print('Error: timed arc going backwards in time!', (g,s,r2), currentNodeTime)
+                    break
+                timedArcsToAdd.append((g, r1, currentNodeTime, s, r2, arrivalNodeTime))
                 currentNodeTime += nodeTimeInterval
+            
+            # Dominate the timed arcs
+            # We know all newly generated timed arcs have same courier group, departure restaurant, sequence and arrival restaurant
+            # We also know there is a maximum of one timed arc for any departure time
+            # timedArc1 dominates timedArc2 if they have the same arrival node time, but timedArc1 has a later leaving node time
+            dominatedArcs = []
+            for timedArc1, timedArc2 in itertools.combinations(timedArcsToAdd, 2):
+                # iterate through all pairs of timed arcs that were just calculated
+                if timedArc1[5] == timedArc2[5]:
+                    # check if they have the same arrival node time
+                    if timedArc1[2] < timedArc2[2]:
+                        # timedArc1 has an earlier leaving node time
+                        dominatedArcs.append(timedArc1)
+                    elif timedArc1[2] > timedArc2[2]:
+                        # timedArc2 has an earlier leaving node time
+                        dominatedArcs.append(timedArc2)
+            
+            # Add all the newly generated timed arcs, ignoring those that were dominated
+            for timedArc in timedArcsToAdd:
+                if timedArc not in dominatedArcs:
+                    timedArcs.add(timedArc)
+            
         else:
+            # the untimed arc in question is a to-home arc, so the departure node is the last node at the restaurant
             leavingNodeTime = max(t for t in nodeTimesByCourierRestaurant[(g,r1)] if t <= latestLeavingTime)
             timedArcs.add((g, r1, leavingNodeTime, s, 0, globalOffTime))
+    
     else:
+        # the untimed arc in question is a from-home arc, so the destination node is the first node at the restaurant
         arrivalNodeTime = min(nodeTimesByCourierRestaurant[(g, r2)])
         timedArcs.add((g, 0, 0, (), r2, arrivalNodeTime))
 
