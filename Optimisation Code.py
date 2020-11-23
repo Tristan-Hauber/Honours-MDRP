@@ -48,7 +48,7 @@ import math
 from collections import defaultdict
 import itertools
 from time import time
-from gurobi import Model, quicksum, GRB
+from gurobipy import Model, quicksum, GRB
 import random
 from operator import lt, gt
 
@@ -753,6 +753,7 @@ if addValidInequalityConstraints:
     
     else:
         # Code for removing broken VIs:
+        m.setParam('OutputFlag', 0)
         extraConstraints = {}
         constraintDict = {}
         t = 0
@@ -856,6 +857,7 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
     successorArcsUsedOnce = {j: IPD.addConstr(quicksum(X[i,j] for i in predecessorsForArc[j]) == 1) for j in predecessorsForArc}
     
     # Solve the model
+    IPD.setParam('OutputFlag', 0)
     IPD.optimize()
     
     # Compute IIS
@@ -882,7 +884,7 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
         alternateSuccessorArcs = set()
         for arc in invalidUntimedArcs:
             group, _, arrivalRestaurant = arc
-            departureRestaurant, earliestLeavingTime, latestLeavingTime, travelTime = untimedArcData[arc][0]
+            departureRestaurant, earliestLeavingTime, latestLeavingTime, travelTime = untimedArcData[arc]
             for untimedArc in untimedArcsByCourierNextRestaurant[group, departureRestaurant]:
                 if untimedArc not in usedUntimedArcs:
                     # Finding predecessors. A valid predecessor will have earliest
@@ -900,10 +902,10 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
                         alternateSuccessorArcs.add(untimedArc)
         
         # Remove Invalid Network
-        m.cbLazy(quicksum(timedArcs for timedArcs in arcsByUntimedArc[untimedArc] for untimedArc in invalidUntimedArcs)
-                 <= len(invalidUntimedArcs) - 1 + quicksum(timedArcs for untimedArc in alternatePredecessorArcs for timedArcs in arcsByUntimedArc[untimedArc]))
-        m.cbLazy(quicksum(timedArcs for timedArcs in arcsByUntimedArc[untimedArc] for untimedArc in invalidUntimedArcs)
-                 <= len(invalidUntimedArcs) - 1 + quicksum(timedArcs for untimedArc in alternateSuccessorArcs for timedArcs in arcsByUntimedArc[untimedArc]))
+        m.cbLazy(quicksum(arcs[timedArc] for untimedArc in invalidUntimedArcs for timedArc in arcsByUntimedArc[untimedArc])
+                  <= len(invalidUntimedArcs) - 1 + quicksum(arcs[timedArc] for untimedArc in alternatePredecessorArcs for timedArc in arcsByUntimedArc[untimedArc]))
+        m.cbLazy(quicksum(arcs[timedArc] for untimedArc in invalidUntimedArcs for timedArc in arcsByUntimedArc[untimedArc])
+                  <= len(invalidUntimedArcs) - 1 + quicksum(arcs[timedArc] for untimedArc in alternateSuccessorArcs for timedArc in arcsByUntimedArc[untimedArc]))
 
 def Callback(model, where):
     if where == GRB.Callback.MIPSOL:
@@ -912,7 +914,7 @@ def Callback(model, where):
         usedTimedArcs = {arc: timedArcValues[arc] for arc in timedArcValues if timedArcValues[arc] > 0}
         usedArcsByGroup = {group: [] for group in courierGroups}
         for arc in usedTimedArcs:
-            if arc[3] != () or arc[1] == 0:
+            if arc[3] != () or arc[1] != arc[4]:
                 usedArcsByGroup[arc[0]].append(arc)
         for group in usedArcsByGroup:
             ComputeAndRemoveMinimalIllegalNetwork(usedArcsByGroup[group])
@@ -925,7 +927,9 @@ for courier in doesThisCourierStart:
     doesThisCourierStart[courier].vtype=GRB.BINARY
 
 m.setParam('Method', 0)
-m.optimize()
+m.setParam('LazyConstraints', 1)
+m.setParam('OutputFlag', 1)
+m.optimize(Callback)
 
 print('Time = ' + str(time() - programStartTime))
 
