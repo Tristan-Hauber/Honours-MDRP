@@ -85,6 +85,8 @@ groupCouriersByOffTime = True
 orderProportion = 1
 seed = 1
 globalNodeIntervals = True
+addValidInequalityConstraints = True
+addVIRecursively = True
 
 
 
@@ -715,97 +717,101 @@ print('Completed main constraints, time = ' + str(time() - programStartTime))
 
 
 
-# Code for doing all VIs:
-VIConstraints = {}
-for arc in untimedArcs:
-    if arc[1] != (): # not an entry arc, do predecessor valid inequalities
-        validPredecessorUntimedArcs = []
-        leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
-        for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
-            if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
-                if set(arc[1]) & set(untimedArc[1]) != set():
-                    continue
-                validPredecessorUntimedArcs.append(untimedArc)
-        if len(validPredecessorUntimedArcs) == 0:
-            print('No predecessor arcs', arc)
-        VIConstraints[(-1,arc,tuple(validPredecessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                    <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
-    if arc[2] != 0: # not an exit arc, do successor valid inequalities
-        validSuccessorUntimedArcs = []
-        _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
-        for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
-            if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
-                if set(arc[1]) & set(untimedArc[1]) != set():
-                    continue
-                validSuccessorUntimedArcs.append(untimedArc)
-        if len(validSuccessorUntimedArcs) == 0:
-            print('No successor arcs', arc)
-        VIConstraints[(1,arc,tuple(validSuccessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                    <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
-GiveMeAStatusUpdate('VI Constraints', VIConstraints)
-m.optimize()
-
-
-
-
-# # Code for removing broken VIs:
-# extraConstraints = {}
-# constraintDict = {}
-# t = 0
-# while True:
-#     constraintsAdded = 0
-#     m.optimize()
-#     usedUntimedArcs = [] # (courierGroup, orderSequence, r2)
-#     for arc in arcs:
-#         if arcs[arc].x > 0.001: # arc was turned on
-#             if arc[1] != arc[4] or arc[3] != (): # not a waiting arc
-#                 untimedArc = (arc[0], arc[3], arc[4])
-#                 usedUntimedArcs.append(untimedArc)
-#     print()
-#     print(str(len(usedUntimedArcs)) + ' total arcs used')
-#     # eventually move the following into a function to go after the generation of 'usedUntimedArcs'?
-#     for arc in usedUntimedArcs: # (group, orderSequence, r2)
-#         if arc[1] != (): # not an entry arc, do predecessor valid inequalities
-#             validPredecessorUntimedArcs = []
-#             leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
-#             for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
-#                 if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
-#                     if set(arc[1]) & set(untimedArc[1]) != set():
-#                         continue
-#                     validPredecessorUntimedArcs.append(untimedArc)
-#             if len(validPredecessorUntimedArcs) == 0:
-#                 print('No predecessor arcs', arc)
-#             if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
-#                 > sum(arcs[timedArc].x for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
-#                 constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-#                             <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
-#                 extraConstraints[t] = [1, arc, validPredecessorUntimedArcs]
-#                 constraintsAdded += 1
-#                 t += 1
-#         if arc[2] != 0: # not an exit arc, do successor valid inequalities
-#             validSuccessorUntimedArcs = []
-#             _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
-#             for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
-#                 if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
-#                     if set(arc[1]) & set(untimedArc[1]) != set():
-#                         continue
-#                     validSuccessorUntimedArcs.append(untimedArc)
-#             if len(validSuccessorUntimedArcs) == 0:
-#                 print('No successor arcs', arc)
-#             if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
-#                 > sum(arcs[timedArc].x for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
-#                 constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-#                             <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
-#                 extraConstraints[t] = [2, arc, validSuccessorUntimedArcs]
-#                 constraintsAdded += 1
-#                 t += 1
-#     if constraintsAdded > 0:
-#         print('Added ' + str(constraintsAdded) + ' valid inequality constraints')
-#         print()
-#     else:
-#         print('No valid inequality constraints added')
-#         print()
-#         break
+if addValidInequalityConstraints:
+    print()
+    if not addVIRecursively:
+        print('Adding all VI constraints')
+        # Code for doing all VIs:
+        VIConstraints = {}
+        for arc in untimedArcs:
+            if arc[1] != (): # not an entry arc, do predecessor valid inequalities
+                validPredecessorUntimedArcs = []
+                leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
+                for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
+                    if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
+                        if set(arc[1]) & set(untimedArc[1]) != set():
+                            continue
+                        validPredecessorUntimedArcs.append(untimedArc)
+                if len(validPredecessorUntimedArcs) == 0:
+                    print('No predecessor arcs', arc)
+                VIConstraints[(-1,arc,tuple(validPredecessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+                            <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
+            if arc[2] != 0: # not an exit arc, do successor valid inequalities
+                validSuccessorUntimedArcs = []
+                _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
+                for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
+                    if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
+                        if set(arc[1]) & set(untimedArc[1]) != set():
+                            continue
+                        validSuccessorUntimedArcs.append(untimedArc)
+                if len(validSuccessorUntimedArcs) == 0:
+                    print('No successor arcs', arc)
+                VIConstraints[(1,arc,tuple(validSuccessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+                            <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
+        GiveMeAStatusUpdate('VI Constraints', VIConstraints)
+        m.optimize()
+    
+    else:
+        # Code for removing broken VIs:
+        extraConstraints = {}
+        constraintDict = {}
+        t = 0
+        while True:
+            print()
+            print(t, 'VI constraints so far after', time()-programStartTime, 'seconds')
+            constraintsAdded = 0
+            m.optimize()
+            usedUntimedArcs = [] # (courierGroup, orderSequence, r2)
+            for arc in arcs:
+                if arcs[arc].x > 0.001: # arc was turned on
+                    if arc[1] != arc[4] or arc[3] != (): # not a waiting arc
+                        untimedArc = (arc[0], arc[3], arc[4])
+                        usedUntimedArcs.append(untimedArc)
+            print()
+            print(str(len(usedUntimedArcs)) + ' total arcs used')
+            # eventually move the following into a function to go after the generation of 'usedUntimedArcs'?
+            for arc in usedUntimedArcs: # (group, orderSequence, r2)
+                if arc[1] != (): # not an entry arc, do predecessor valid inequalities
+                    validPredecessorUntimedArcs = []
+                    leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
+                    for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
+                        if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
+                            if set(arc[1]) & set(untimedArc[1]) != set():
+                                continue
+                            validPredecessorUntimedArcs.append(untimedArc)
+                    if len(validPredecessorUntimedArcs) == 0:
+                        print('No predecessor arcs', arc)
+                    if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
+                        > sum(arcs[timedArc].x for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
+                        constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+                                    <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
+                        extraConstraints[t] = [1, arc, validPredecessorUntimedArcs]
+                        constraintsAdded += 1
+                        t += 1
+                if arc[2] != 0: # not an exit arc, do successor valid inequalities
+                    validSuccessorUntimedArcs = []
+                    _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
+                    for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
+                        if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
+                            if set(arc[1]) & set(untimedArc[1]) != set():
+                                continue
+                            validSuccessorUntimedArcs.append(untimedArc)
+                    if len(validSuccessorUntimedArcs) == 0:
+                        print('No successor arcs', arc)
+                    if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
+                        > sum(arcs[timedArc].x for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
+                        constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
+                                    <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
+                        extraConstraints[t] = [2, arc, validSuccessorUntimedArcs]
+                        constraintsAdded += 1
+                        t += 1
+            if constraintsAdded > 0:
+                print('Added ' + str(constraintsAdded) + ' valid inequality constraints')
+                print()
+            else:
+                print('No valid inequality constraints added')
+                print()
+                break
 print('Time = ' + str(time() - programStartTime))
 
 
