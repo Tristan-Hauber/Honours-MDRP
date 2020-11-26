@@ -672,7 +672,6 @@ for untimedArc in arcsByUntimedArc:
 
 print()
 m = Model('MDRP')
-m.setParam('Method', 2)
 
 
 
@@ -712,13 +711,13 @@ courierStartsMatchesNumber = {g: m.addConstr(quicksum(doesThisCourierStart[c]
                                              == quicksum(arcs[arc] for arc in outArcsByCourier[g])
                                              ) for g in courierGroups}
 print('Completed main constraints, time = ' + str(time() - programStartTime))
+print()
 
 
 
 
 
 if addValidInequalityConstraints:
-    print()
     if not addVIRecursively:
         print('Adding all VI constraints')
         # Code for doing all VIs:
@@ -752,13 +751,13 @@ if addValidInequalityConstraints:
         m.optimize()
     
     else:
+        # TODO: ? Add output for VI broken amounts
         # Code for removing broken VIs:
         m.setParam('OutputFlag', 0)
         extraConstraints = {}
         constraintDict = {}
         t = 0
         while True:
-            print()
             print(t, 'VI constraints so far after', time()-programStartTime, 'seconds')
             constraintsAdded = 0
             m.optimize()
@@ -825,7 +824,7 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
     for (g, _, _, s, r2, _) in listOfTimedArcs:
         untimedArc = (g, s, r2)
         if untimedArc in usedUntimedArcs:
-            print('Error! Duplicate use of untimed arc in solution!')
+            print('Error! Duplicate use of untimed arc in solution!', untimedArc)
         usedUntimedArcs.append(untimedArc)
     
     # Find all possible predecessor-successor pairs
@@ -906,12 +905,13 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
                   <= len(invalidUntimedArcs) - 1 + quicksum(arcs[timedArc] for untimedArc in alternatePredecessorArcs for timedArc in arcsByUntimedArc[untimedArc]))
         m.cbLazy(quicksum(arcs[timedArc] for untimedArc in invalidUntimedArcs for timedArc in arcsByUntimedArc[untimedArc])
                   <= len(invalidUntimedArcs) - 1 + quicksum(arcs[timedArc] for untimedArc in alternateSuccessorArcs for timedArc in arcsByUntimedArc[untimedArc]))
+        # TODO: Save these cuts somewhere
 
 def Callback(model, where):
     if where == GRB.Callback.MIPSOL:
         # print(model.cbGetSolution(model.vars))
         timedArcValues = {arc: value for (arc, value) in zip(arcs.keys(), model.cbGetSolution(list(arcs.values())))}
-        usedTimedArcs = {arc: timedArcValues[arc] for arc in timedArcValues if timedArcValues[arc] > 0}
+        usedTimedArcs = {arc: timedArcValues[arc] for arc in timedArcValues if timedArcValues[arc] > 0.01}
         usedArcsByGroup = {group: [] for group in courierGroups}
         for arc in usedTimedArcs:
             if arc[3] != () or arc[1] != arc[4]:
@@ -926,7 +926,7 @@ for arc in arcs:
 for courier in doesThisCourierStart:
     doesThisCourierStart[courier].vtype=GRB.BINARY
 
-m.setParam('Method', 0)
+m.setParam('Method', 2)
 m.setParam('LazyConstraints', 1)
 m.setParam('OutputFlag', 1)
 m.optimize(Callback)
