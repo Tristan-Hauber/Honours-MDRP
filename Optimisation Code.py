@@ -751,14 +751,13 @@ if addValidInequalityConstraints:
         m.optimize()
     
     else:
-        # TODO: ? Add output for VI broken amounts
         # Code for removing broken VIs:
         m.setParam('OutputFlag', 0)
         extraConstraints = {}
         constraintDict = {}
         t = 0
+        print('# of arcs, # VI added, total VI count, time')
         while True:
-            print(t, 'VI constraints so far after', time()-programStartTime, 'seconds')
             constraintsAdded = 0
             m.optimize()
             usedUntimedArcs = [] # (courierGroup, orderSequence, r2)
@@ -767,10 +766,9 @@ if addValidInequalityConstraints:
                     if arc[1] != arc[4] or arc[3] != (): # not a waiting arc
                         untimedArc = (arc[0], arc[3], arc[4])
                         usedUntimedArcs.append(untimedArc)
-            print()
-            print(str(len(usedUntimedArcs)) + ' total arcs used')
             # eventually move the following into a function to go after the generation of 'usedUntimedArcs'?
             for arc in usedUntimedArcs: # (group, orderSequence, r2)
+                activationOfUntimedArc = sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc])
                 if arc[1] != (): # not an entry arc, do predecessor valid inequalities
                     validPredecessorUntimedArcs = []
                     leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
@@ -781,11 +779,11 @@ if addValidInequalityConstraints:
                             validPredecessorUntimedArcs.append(untimedArc)
                     if len(validPredecessorUntimedArcs) == 0:
                         print('No predecessor arcs', arc)
-                    if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
-                        > sum(arcs[timedArc].x for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
+                    activationOfPredecessors = sum(arcs[timedArc].x for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc])
+                    if activationOfUntimedArc > activationOfPredecessors + 0.01:
                         constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
                                     <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
-                        extraConstraints[t] = [1, arc, validPredecessorUntimedArcs]
+                        extraConstraints[t] = [1, arc, validPredecessorUntimedArcs, activationOfUntimedArc - activationOfPredecessors]
                         constraintsAdded += 1
                         t += 1
                 if arc[2] != 0: # not an exit arc, do successor valid inequalities
@@ -798,20 +796,20 @@ if addValidInequalityConstraints:
                             validSuccessorUntimedArcs.append(untimedArc)
                     if len(validSuccessorUntimedArcs) == 0:
                         print('No successor arcs', arc)
-                    if sum(arcs[timedArc].x for timedArc in arcsByUntimedArc[arc]) \
-                        > sum(arcs[timedArc].x for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]) + 0.01:
+                    activationOfSuccessors = sum(arcs[timedArc].x for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc])
+                    if activationOfUntimedArc > activationOfSuccessors + 0.01:
                         constraintDict[t] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
                                     <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
-                        extraConstraints[t] = [2, arc, validSuccessorUntimedArcs]
+                        extraConstraints[t] = [2, arc, validSuccessorUntimedArcs, activationOfUntimedArc - activationOfSuccessors]
                         constraintsAdded += 1
                         t += 1
-            if constraintsAdded > 0:
-                print('Added ' + str(constraintsAdded) + ' valid inequality constraints')
-                print()
-            else:
-                print('No valid inequality constraints added')
-                print()
+            
+            # Output
+            # Number of arcs used, number of VI constraints added, total number of VI constraints, time
+            print(len(usedUntimedArcs), '   ', constraintsAdded, '   ', t, '   ', int(time() - programStartTime))
+            if constraintsAdded == 0:
                 break
+print()
 print('Time = ' + str(time() - programStartTime))
 
 
@@ -910,8 +908,6 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
                   <= len(invalidUntimedArcs) - 1 + quicksum(arcs[timedArc] for untimedArc in alternateSuccessorArcs for timedArc in arcsByUntimedArc[untimedArc]))
         callbackCuts.append((-1, invalidUntimedArcs, alternatePredecessorArcs))
         callbackCuts.append((1, invalidUntimedArcs, alternateSuccessorArcs))
-        
-        # TODO: Save these cuts somewhere
 
 def Callback(model, where):
     if where == GRB.Callback.MIPSOL:
