@@ -34,11 +34,7 @@ Created on Thu Aug  6 15:43:43 2020
 # TODO: Properly remove arcs that go to the same node as they left
 # TODO: Remove or formalise home -> home arcs
 # TODO: Revise code to ensure correctness
-# TODO: Confirm that VI cuts aren't causing a problem
 # TODO: Add an entry untimed arc for every courier, not just every group
-# TODO: Find out why non-global node times is infeasible
-# TODO: Ensure globalNodeIntervals = False works
-# TODO: Ensure groupCouriersByOffTime = False works
 
 
 
@@ -82,6 +78,7 @@ programStartTime = time()
 
 nodeTimeInterval = 8 # minutes between nodes
 groupCouriersByOffTime = True
+groupCouriersByOnTime = True
 orderProportion = 1
 seed = 1
 globalNodeIntervals = True
@@ -177,11 +174,18 @@ if orderProportion < 1.0:
 
 courierGroups = {}
 if groupCouriersByOffTime:
-    for courier in courierData:
-        offTime = courierData[courier][3]
-        if offTime not in courierGroups:
-            courierGroups[offTime] = [[], offTime]
-        courierGroups[offTime][0].append(courier)
+    if not groupCouriersByOnTime:
+        for courier in courierData:
+            offTime = courierData[courier][3]
+            if offTime not in courierGroups:
+                courierGroups[offTime] = [[], offTime]
+            courierGroups[offTime][0].append(courier)
+    else:
+        for courier in courierData:
+            _, _, onTime, offTime = courierData[courier]
+            if (onTime, offTime) not in courierGroups:
+                courierGroups[(onTime, offTime)] = [[], offTime]
+            courierGroups[(onTime, offTime)][0].append(courier)
 else:
     for courier in courierData:
         courierGroups[courier] = [[courier], courierData[courier][3]]
