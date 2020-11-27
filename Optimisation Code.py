@@ -817,7 +817,7 @@ print('Time = ' + str(time() - programStartTime))
 
 
 
-
+callbackCuts = []
 def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
     # Take the list of timed arcs, and convert them to untimed arcs
     usedUntimedArcs = []
@@ -833,10 +833,13 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
     for (arc1, arc2) in itertools.combinations(usedUntimedArcs, 2):
         arc1Data = untimedArcData[arc1]
         arc2Data = untimedArcData[arc2]
-        if arc1Data[1] + arc1Data[3] <= arc2Data[2] and arc1[2] == arc2Data[0]:
+        if arc1Data[1] + arc1Data[3] <= arc2Data[2] and arc1[2] == arc2Data[0] and arc1[2] != 0:
+            # Earliest arrival before latest departure
+            # The arrival location of the first arc is the departure location of the second
+            # The first arc does not head home
             successorsForArc[arc1].append(arc2)
             predecessorsForArc[arc2].append(arc1)
-        if arc2Data[1] + arc2Data[3] <= arc1Data[2] and arc2[2] == arc1Data[0]:
+        if arc2Data[1] + arc2Data[3] <= arc1Data[2] and arc2[2] == arc1Data[0] and arc2[2] != 0:
             successorsForArc[arc2].append(arc1)
             predecessorsForArc[arc1].append(arc2)
     successorsForArc = dict(successorsForArc)
@@ -876,7 +879,7 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
                 if predecessorArcsUsedOnce[predecessor].IISConstr:
                     invalidUntimedArcs.add(predecessor)
                 if successorArcsUsedOnce[successor].IISConstr:
-                    invalidUntimedArcs.add(successor)                    
+                    invalidUntimedArcs.add(successor)
         
         # Find possible replacement arcs
         alternatePredecessorArcs = set()
@@ -905,6 +908,9 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
                   <= len(invalidUntimedArcs) - 1 + quicksum(arcs[timedArc] for untimedArc in alternatePredecessorArcs for timedArc in arcsByUntimedArc[untimedArc]))
         m.cbLazy(quicksum(arcs[timedArc] for untimedArc in invalidUntimedArcs for timedArc in arcsByUntimedArc[untimedArc])
                   <= len(invalidUntimedArcs) - 1 + quicksum(arcs[timedArc] for untimedArc in alternateSuccessorArcs for timedArc in arcsByUntimedArc[untimedArc]))
+        callbackCuts.append((-1, invalidUntimedArcs, alternatePredecessorArcs))
+        callbackCuts.append((1, invalidUntimedArcs, alternateSuccessorArcs))
+        
         # TODO: Save these cuts somewhere
 
 def Callback(model, where):
