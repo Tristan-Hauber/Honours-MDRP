@@ -27,12 +27,7 @@ Created on Thu Aug  6 15:43:43 2020
 # Done: Add illegal path elimination constraints in callback
 
 # Improvements:
-# TODO: Merge sequence-restaurant pair generation with sequence generation
 # TODO: Put sequence + pair domination into the one function
-# TODO: Properly remove arcs that go backwards in time
-# TODO: Properly remove duplicate on-off arcs
-# TODO: Properly remove arcs that go to the same node as they left
-# TODO: Remove or formalise home -> home arcs
 # TODO: Revise code to ensure correctness
 # TODO: Add an entry untimed arc for every courier, not just every group
 
@@ -78,7 +73,7 @@ programStartTime = time()
 
 nodeTimeInterval = 8 # minutes between nodes
 groupCouriersByOffTime = True
-groupCouriersByOnTime = True
+groupCouriersByOnTime = False
 orderProportion = 1
 seed = 1
 globalNodeIntervals = True
@@ -915,7 +910,6 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
 
 def Callback(model, where):
     if where == GRB.Callback.MIPSOL:
-        # print(model.cbGetSolution(model.vars))
         timedArcValues = {arc: value for (arc, value) in zip(arcs.keys(), model.cbGetSolution(list(arcs.values())))}
         usedTimedArcs = {arc: timedArcValues[arc] for arc in timedArcValues if timedArcValues[arc] > 0.01}
         usedArcsByGroup = {group: [] for group in courierGroups}
