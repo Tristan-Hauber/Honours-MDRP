@@ -71,7 +71,8 @@ programStartTime = time()
 
 
 
-nodeTimeInterval = 8 # minutes between nodes
+nodeTimeInterval = 8
+# minutes between nodes
 groupCouriersByOffTime = True
 groupCouriersByOnTime = False
 orderProportion = 1
@@ -325,7 +326,8 @@ GiveMeAStatusUpdate('post-domination pairs', sequenceNextRestaurantData)
 
 
 
-untimedArcs = set() # {(offTime1, sequence1, nextRestaurant1), (offTime2, sequence2, nextRestaurant2), ...}
+untimedArcs = set()
+# {((group1, 0), sequence1, nextRestaurant1), ((group2, 0), sequence2, nextRestaurant2), ...}
 # Main untimedArcs
 # Create (courierGroup, orderSequence, nextRestaurant) triples
 # Loop through (orderSequence, nextRestaurant) pairs, and loop through groups, checking to see if valid together
@@ -371,8 +373,8 @@ for sequence, nextRestaurant in sequenceNextRestaurantData:
                         latestDepartureAtDepartureRestaurant = min(latestArrivalAtNextRestaurant - travelTime, latestLeavingTime)
                         if latestDepartureAtDepartureRestaurant < earliestDepartureFromDepartureRestaurant:
                             print('Main untimed arc error 2!', str(group), str(sequence), str(nextRestaurant))
-                        untimedArcs.add((group, sequence, nextRestaurant))
-                        untimedArcData[(group, sequence, nextRestaurant)] = [restaurant, earliestDepartureFromDepartureRestaurant, latestDepartureAtDepartureRestaurant, travelTime]
+                        untimedArcs.add(((group, 0), sequence, nextRestaurant))
+                        untimedArcData[((group, 0), sequence, nextRestaurant)] = [restaurant, earliestDepartureFromDepartureRestaurant, latestDepartureAtDepartureRestaurant, travelTime]
 GiveMeAStatusUpdate('main untimedArcs', untimedArcs)
 
 
@@ -381,7 +383,7 @@ GiveMeAStatusUpdate('main untimedArcs', untimedArcs)
 
 # Exit untimedArcs
 # Create sequence-courier (off time) pairs, with nextRestaurant = 0
-# An untimed exit arc is of the form (group, sequence, 0)
+# An untimed exit arc is of the form ((group,), sequence, 0)
 # Iterate through all group, sequence pairs, checking if compatible:
 # - Earliest leaving time must be before the group's off time
 # - At least one courier can arrive at the restaurant before off time
@@ -401,75 +403,58 @@ for sequence in sequenceData:
                     foundValidCourier = True
                     bestArrivalTime = min(arrivalTime, bestArrivalTime)
             if foundValidCourier: # only add arc if valid courier found, add data for best courier found
-                untimedArcs.add((group, sequence, 0))
-                untimedArcData[(group, sequence, 0)] = [restaurant, max(earliestLeavingTime, bestArrivalTime), min(latestLeavingTime, offTime), totalTravelTime]
-                exitUntimedArcsByCourierRestaurant[(group, restaurant)].append((group, sequence, 0))
+                untimedArcs.add(((group, 0), sequence, 0))
+                untimedArcData[((group, 0), sequence, 0)] = [restaurant, max(earliestLeavingTime, bestArrivalTime), min(latestLeavingTime, offTime), totalTravelTime]
+                exitUntimedArcsByCourierRestaurant[(group, restaurant)].append(((group, 0), sequence, 0))
 exitUntimedArcsByCourierRestaurant = dict(exitUntimedArcsByCourierRestaurant)
 GiveMeAStatusUpdate('main + exit untimedArcs', untimedArcs)
 
-
-
-
-
-# Entry untimedArcs
-# An entry untimed arc is of the form (courierGroup, (), restaurant)
-# Iterate through courier groups and restaurants, finding compatible pairs
+# Entry untimed arcs
+# An entry untimed arc is of the form ((courierGroup, courier), (), restaurant)
+# Iterate through couriers within courier groups and restaurants, finding compatible pairs
 # Compatible if:
-# - can arrive at restaurant before off time
-# - there is at least one order at the restaurant such that:
-#   - the latest leaving time for the order is after at least one courier's on time
-#   - the order ready time is before the group's off time
-# Earliest leaving time is the on time of the courier that can get to the restaurant at the earliest
-# Travel time is the commute of the courier that can get to the restaurant earliest
-# Latest leaving time is the latest time that the courier can leave so that they will get to the restaurant in time to deliver an order
+# - The courier can arrive at the restaurant before offtime
+# - There is at least one order at the restaurant such that:
+#   - The order's ready time is before the courier's off time
+#   - The order's latest departure time is after the courier's arrival time
+# Assume for calculations that the courier will travel directly to the restaurant, from home, at the beginning of the shift
+
 for group in courierGroups:
     offTime = courierGroups[group][1]
-    for restaurant in restaurantData:
-        foundValidCourier = False
-        bestArrival = globalOffTime
-        bestCourier = 0
-        for courier in courierGroups[group][0]:
-            # Loop through couriers. Find the courier that can get to the
-            # restaurant the soonest, and save the data for that courier.
-            commute = TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2
-            arrivalTime = courierData[courier][2] + commute
-            if arrivalTime <= offTime:
-                foundValidCourier = True
-                if arrivalTime < bestArrival:
-                    earliestLeavingTime = courierData[courier][2]
-                    bestArrival = arrivalTime
-                    travelTime = commute
-        if foundValidCourier:
-            latestArrival = 0
-            foundValidOrder = False
-            for order in ordersAtRestaurant[restaurant]:
-                # Loop through orders. If an order is ready at a time that
-                # makes it deliverable by the courier, keep track of the
-                # statistics.
-                if orderData[order][4] <= offTime and orderData[order][5] >= bestArrival:
-                    latestArrival = max(latestArrival, orderData[order][5])
-                    foundValidOrder = True
-            if foundValidOrder:
-                latestLeavingTime = min(latestArrival, offTime) - travelTime
-                if latestLeavingTime < earliestLeavingTime:
-                    print('Error! Invalid entry untimed arc:', str(group), str(restaurant))
-                untimedArcs.add((group, (), restaurant))
-                untimedArcData[(group, (), restaurant)] = [0, earliestLeavingTime, latestLeavingTime, travelTime]
-GiveMeAStatusUpdate('all untimedArcs', untimedArcs)
-
-
-
-
+    for courier in courierGroups[group][0]:
+        courierShiftStartTime = courierData[courier][2]
+        for restaurant in restaurantData:
+            # Looping through every courier-restaurant pair
+            commuteToRestaurant = TravelTime(courierData[courier], restaurantData[restaurant]) + pickupServiceTime / 2
+            earliestArrivalAtRestaurant = courierShiftStartTime + commuteToRestaurant
+            if earliestArrivalAtRestaurant <= offTime:
+                # Checking that the courier can arrive before its off time
+                latestAllowedCourierArrival = 0
+                for order in ordersAtRestaurant[restaurant]:
+                    # Loop through orders, to check if courier-restaurant pair is valid
+                    if orderData[order][4] <= offTime and orderData[order][5] >= earliestArrivalAtRestaurant:
+                        # This order is deliverable by the courier
+                        if orderData[order][5] > offTime:
+                            # If this is true, the courier has no time restriction on when it arrives at the restaurant
+                            latestAllowedCourierArrival = offTime
+                            break
+                        latestAllowedCourierArrival = max(latestAllowedCourierArrival, orderData[order][5])
+                if latestAllowedCourierArrival >= earliestArrivalAtRestaurant:
+                    if earliestArrivalAtRestaurant <= 0:
+                        print('Error! Courier arriving at restaurant before the day starts!', courier, restaurant)
+                    # If this is true, then there must have been at least one valid order to bring the latest allowed arrival above zero
+                    untimedArcs.add(((group, courier), (), restaurant))
+                    untimedArcData[((group, courier), (), restaurant)] = [0, courierShiftStartTime, latestAllowedCourierArrival - commuteToRestaurant, commuteToRestaurant]
+GiveMeAStatusUpdate('untimed arcs total', untimedArcs)
 
 untimedArcsByCourierRestaurant = defaultdict(list)
-# (offTime, departureRestaurant): [(offTime, sequence1, nextRestaurant1), (offTime, sequence2, nextRestaurant2), ...]
 untimedArcsByCourierNextRestaurant = defaultdict(list)
 for arc in untimedArcs:
     if arc[1] == ():
-        untimedArcsByCourierRestaurant[(arc[0], 0)].append(arc)
+        untimedArcsByCourierRestaurant[(arc[0][0], 0)].append(arc)
     else:
-        untimedArcsByCourierRestaurant[(arc[0], orderData[arc[1][0]][3])].append(arc)
-    untimedArcsByCourierNextRestaurant[(arc[0], arc[2])].append(arc)
+        untimedArcsByCourierRestaurant[(arc[0][0], untimedArcData[arc][0])].append(arc)
+    untimedArcsByCourierNextRestaurant[(arc[0][0], arc[2])].append(arc)
 untimedArcsByCourierRestaurant = dict(untimedArcsByCourierRestaurant)
 untimedArcsByCourierNextRestaurant = dict(untimedArcsByCourierNextRestaurant)
 
@@ -490,123 +475,138 @@ nodeTimesByCourierRestaurant = defaultdict(list)
 for group, restaurant in untimedArcsByCourierRestaurant:
     if restaurant != 0:
         offTime = courierGroups[group][1]
-
-        earliestArrivalTime = min(courierData[c][2] + TravelTime(courierData[c], restaurantData[restaurant]) for c in courierGroups[group][0])
-        earliestArrivalTime += pickupServiceTime / 2
+        
+        # Calculate the first time that we should consider, i.e., the time for the first node for that group-restaurant pair
+        earliestArrivalTime = min(untimedArcData[arc][1] + untimedArcData[arc][3] for arc in untimedArcsByCourierNextRestaurant[(group, restaurant)])
         earliestOrderTime = min(orderData[o][4] for o in ordersAtRestaurant[restaurant] if orderData[o][4] <= offTime if orderData[o][5] >= earliestArrivalTime)
         firstInterestingTime = max(earliestArrivalTime, earliestOrderTime)
-
+        
+        # Calculate the last time that we should consider, i.e., the time for the last node for that group-restaurant pair
         groupOffTime = courierGroups[group][1]
         latestOrderTime = max(orderData[o][5] for o in ordersAtRestaurant[restaurant] if orderData[o][4] <= offTime if orderData[o][5] >= earliestArrivalTime)
         lastInterestingTime = min(offTime, latestOrderTime)
         
+        # If globalNodeIntervals is true, then all node times will be integer multiples of the nodeTimeInterval
         if globalNodeIntervals:
             possibleNodeTimes = list(i for i in range(0, globalOffTime + 1, nodeTimeInterval))
             firstNodeTime = max(t for t in possibleNodeTimes if t <= firstInterestingTime)
         else:
             firstNodeTime = firstInterestingTime
         
+        # All node times, when compared to other node times for the same group-restaurant pair, differ by an integer multiple of the nodeTimeInterval
+        # In addition, the node times are every time that fulfills the above condition and is less than or equal to the lastInterestingTime
         nodeTime = firstNodeTime
         while nodeTime <= lastInterestingTime:
             nodesInModel.add((group, restaurant, nodeTime))
             nodeTimesByCourierRestaurant[(group, restaurant)].append(nodeTime)
             nodeTime += nodeTimeInterval
 
-GiveMeAStatusUpdate('nodes generated', nodesInModel)
-
+# In addition to having nodes for every group-restaurant pair, we need a starting node and an ending node for the couriers at 'home', or restaurant 0
 for group in courierGroups:
     nodesInModel.add((group, 0, 0))
     nodesInModel.add((group, 0, globalOffTime))
     nodeTimesByCourierRestaurant[(group, 0)] = [0, globalOffTime]
 nodeTimesByCourierRestaurant = dict(nodeTimesByCourierRestaurant)
-
-
-
-
+GiveMeAStatusUpdate('nodes generated', nodesInModel)
 
 nodesByOfftimeRestaurantPair = defaultdict(list)
 # (offTime, departureRestaurant): [(offTime, departureRestaurant, time1), (offTime, departureRestaurant, time2), ...]
 for node in nodesInModel:
     nodesByOfftimeRestaurantPair[node[:2]].append(node)
 nodesByOfftimeRestaurantPair = dict(nodesByOfftimeRestaurantPair)
+
 timedArcs = set()
-# An arc is defined by a (courierOffTime, restaurant1, time1, orderSequence, restaurant2, time2) sextuple
-# time2 is a function of time1, orderSequence, restaurant2
-for (g, s, r2) in untimedArcData:
-    if s != ():
-        r1, earliestLeavingTime, latestLeavingTime, travelTime = untimedArcData[g,s,r2]
-        if r2 != 0:
-            # only considering main arcs, that is, travel from restaurant to restaurant
-            offTime = courierGroups[g][1]
-            nodeTimesAtLeavingRestaurant = nodeTimesByCourierRestaurant[(g, r1)]
-            nodeTimesAtArrivingRestaurant = nodeTimesByCourierRestaurant[(g, r2)]
-            nodeTimesAtLeavingRestaurant.sort()
-            nodeTimesAtArrivingRestaurant.sort()
-            
-            # find the first arc's leaving time - the largest node time that is before the earliest leaving time
-            if min(nodeTimesAtLeavingRestaurant) <= earliestLeavingTime:
-                firstArcLeavingTime = max(i for i in nodeTimesAtLeavingRestaurant if i <= earliestLeavingTime)
-            else:
-                print('Error: No early enough node time for arc conversion to timed arc!', arc)
-                if min(nodeTimesAtLeavingRestaurant) > latestLeavingTime:
-                    break
-                else:
-                    firstArcLeavingTime = min(nodeTimesAtLeavingRestaurant)
-            
-            # Add a timed arc for every departing node time valid for the untimed arc
-            # Start times increase by the nodeTimeInterval parameter
-            currentNodeTime = firstArcLeavingTime
-            timedArcsToAdd = []
-            while currentNodeTime <= latestLeavingTime:
-                arrivalAtNextRestaurant = max(currentNodeTime, earliestLeavingTime) + travelTime
-                # Two cases: there are nodes at the arriving restaurant around when the courier arrives, or not
-                if min(nodeTimesAtArrivingRestaurant) <= arrivalAtNextRestaurant:
-                    # Arrival node time is given by the latest node time at the restaurant, that is before the arrival time
-                    arrivalNodeTime = max(i for i in nodeTimesAtArrivingRestaurant if i <= arrivalAtNextRestaurant)
-                else:
-                    # Arrival node time is the earliest node time at the restaurant, that is after the arrival time
-                    arrivalNodeTime = min(nodeTimesAtArrivingRestaurant)
-                if arrivalNodeTime < currentNodeTime:
-                    print('Error: timed arc going backwards in time!', (g,s,r2), currentNodeTime)
-                    break
-                timedArcsToAdd.append((g, r1, currentNodeTime, s, r2, arrivalNodeTime))
-                currentNodeTime += nodeTimeInterval
-            
-            # Dominate the timed arcs
-            # We know all newly generated timed arcs have same courier group, departure restaurant, sequence and arrival restaurant
-            # We also know there is a maximum of one timed arc for any departure time
-            # timedArc1 dominates timedArc2 if they have the same arrival node time, but timedArc1 has a later leaving node time
-            dominatedArcs = []
-            for timedArc1, timedArc2 in itertools.combinations(timedArcsToAdd, 2):
-                # iterate through all pairs of timed arcs that were just calculated
-                if timedArc1[5] == timedArc2[5]:
-                    # check if they have the same arrival node time
-                    if timedArc1[2] < timedArc2[2]:
-                        # timedArc1 has an earlier leaving node time
-                        dominatedArcs.append(timedArc1)
-                    elif timedArc1[2] > timedArc2[2]:
-                        # timedArc2 has an earlier leaving node time
-                        dominatedArcs.append(timedArc2)
-            
-            # Add all the newly generated timed arcs, ignoring those that were dominated
-            for timedArc in timedArcsToAdd:
-                if timedArc not in dominatedArcs:
-                    timedArcs.add(timedArc)
-            
+# A timed arc is a sextuple of the form ((g, c), r1, t1, s, r2, t2), where:
+# - g is the courier-group that is following the arc
+# - c != 0 if the arc is an entry arc, otherwise, c = 0. c is the courier that completes the arc, c = 0 means, at least theoretically, any of multiple couriers can do it
+# - r1 is the departure restaurant. If the arc is not a waiting arc, then r1 is determined by s
+# - t1 is the time of the departure node
+# - s is the sequence that is delivered on the journey between the two nodes
+# - r2 is the arrival restaurant
+# - t2 is the time of the arrival node. t2 is determined by the untimed arc ((g,c),s,r2) and the time t1
+# A waiting arc is a timed arc such that r1 = r2 and s = (). Multiple couriers can follow the one timed arc in the one solution
+# Generation of timed arcs:
+# - Loop through every untimed arc, that is, ((g,c),s,r2)
+# - Loop through every possible starting node, and calculate the corresponding ending node
+# - Dominate the timed arcs
+# Two special cases of untimed arcs will be dealt with separately:
+# - s = (). In this case, the untimed arc is an entry arc, and the timed arc will only have one possible starting node (that is, home) and thus one corresponding ending node
+# - r2 = 0. In this case, the untimed arc is an exit arc, and the timed arc will only have one possible ending node (that is, home) and thus one corresponding starting node
+# Waiting arcs will be generated separately
+for ((g, c), s, r2) in untimedArcData:
+    r1, earliestDepartureTime, latestDepartureTime, travelTime = untimedArcData[((g,c), s, r2)]
+    if s == ():
+        # untimed arc is an entry arc. The timed arc starts at home, and goes to the first possible node
+        arrivalTimeAtRestaurant = untimedArcData[((g,c),s,r2)][1] + untimedArcData[((g,c),s,r2)][3]
+        if min(nodeTimesByCourierRestaurant[(g,r2)]) > arrivalTimeAtRestaurant:
+            arrivalNodeTime = min(nodeTimesByCourierRestaurant[(g,r2)])
         else:
-            # the untimed arc in question is a to-home arc, so the departure node is the last node at the restaurant
-            leavingNodeTime = max(t for t in nodeTimesByCourierRestaurant[(g,r1)] if t <= latestLeavingTime)
-            timedArcs.add((g, r1, leavingNodeTime, s, 0, globalOffTime))
+            arrivalNodeTime = max(t for t in nodeTimesByCourierRestaurant[(g,r2)] if t <= arrivalTimeAtRestaurant)
+        timedArcs.add(((g,c), 0, 0, (), r2, arrivalNodeTime))
+    
+    elif r2 == 0:
+        # untimed arc is an exit arc. The timed arc ends at home, and comes from the last possible node
+        departureNodeTime = max(t for t in nodeTimesByCourierRestaurant[(g,r1)] if t <= latestDepartureTime)
+        timedArcs.add(((g,c), r1, departureNodeTime, s, r2, globalOffTime))
     
     else:
-        # the untimed arc in question is a from-home arc, so the destination node is the first node at the restaurant
-        arrivalNodeTime = min(nodeTimesByCourierRestaurant[(g, r2)])
-        timedArcs.add((g, 0, 0, (), r2, arrivalNodeTime))
-
-
-
-
-
+        # untimed arc is a main arc, going from restaurant to restaurant while delivering a sequence of orders        
+        offTime = courierGroups[g][1]
+        nodeTimesAtLeavingRestaurant = nodeTimesByCourierRestaurant[(g, r1)]
+        nodeTimesAtArrivingRestaurant = nodeTimesByCourierRestaurant[(g, r2)]
+        nodeTimesAtLeavingRestaurant.sort()
+        nodeTimesAtArrivingRestaurant.sort()
+        
+        # find the first arc's leaving time - the largest node time that is before the earliest leaving time
+        if min(nodeTimesAtLeavingRestaurant) <= earliestDepartureTime:
+            firstArcLeavingTime = max(i for i in nodeTimesAtLeavingRestaurant if i <= earliestDepartureTime)
+        else:
+            print('Error: No early enough node time for arc conversion to timed arc!', ((g, c), s, r2))
+            if min(nodeTimesAtLeavingRestaurant) > latestDepartureTime:
+                break
+            else:
+                firstArcLeavingTime = min(nodeTimesAtLeavingRestaurant)
+        
+        # Add a timed arc for every departing node time valid for the untimed arc
+        # Start times increase by the nodeTimeInterval parameter
+        currentNodeTime = firstArcLeavingTime
+        timedArcsToAdd = []
+        while currentNodeTime <= latestDepartureTime:
+            arrivalAtNextRestaurant = max(currentNodeTime, earliestLeavingTime) + travelTime
+            # Two cases: there are nodes at the arriving restaurant around when the courier arrives, or not
+            if min(nodeTimesAtArrivingRestaurant) <= arrivalAtNextRestaurant:
+                # Arrival node time is given by the latest node time at the restaurant, that is before the arrival time
+                arrivalNodeTime = max(i for i in nodeTimesAtArrivingRestaurant if i <= arrivalAtNextRestaurant)
+            else:
+                # Arrival node time is the earliest node time at the restaurant, that is after the arrival time
+                arrivalNodeTime = min(nodeTimesAtArrivingRestaurant)
+            if arrivalNodeTime < currentNodeTime:
+                print('Error: timed arc going backwards in time!', ((g,c),s,r2), currentNodeTime)
+                break
+            timedArcsToAdd.append(((g,c), r1, currentNodeTime, s, r2, arrivalNodeTime))
+            currentNodeTime += nodeTimeInterval
+        
+        # Dominate the timed arcs
+        # We know all newly generated timed arcs have same courier group, departure restaurant, sequence and arrival restaurant
+        # We also know there is a maximum of one timed arc for any departure time
+        # timedArc1 dominates timedArc2 if they have the same arrival node time, but timedArc1 has a later leaving node time
+        dominatedArcs = []
+        for timedArc1, timedArc2 in itertools.combinations(timedArcsToAdd, 2):
+            # iterate through all pairs of timed arcs that were just calculated
+            if timedArc1[5] == timedArc2[5]:
+                # check if they have the same arrival node time
+                if timedArc1[2] < timedArc2[2]:
+                    # timedArc1 has an earlier leaving node time
+                    dominatedArcs.append(timedArc1)
+                elif timedArc1[2] > timedArc2[2]:
+                    # timedArc2 has an earlier leaving node time
+                    dominatedArcs.append(timedArc2)
+        
+        # Add all the newly generated timed arcs, ignoring those that were dominated
+        for timedArc in timedArcsToAdd:
+            if timedArc not in dominatedArcs:
+                timedArcs.add(timedArc)
+    
 # Waiting arcs
 def NodeTime(node):
     return node[2]
@@ -615,38 +615,38 @@ for pair in nodesByOfftimeRestaurantPair:
     if len(nodeList) > 0:
         nodeList.sort(key = NodeTime)
         for i in range(1, len(nodeList)):
-            timedArcs.add((pair[0], pair[1], nodeList[i-1][2], (), pair[1], nodeList[i][2]))
+            timedArcs.add(((pair[0],0), pair[1], nodeList[i-1][2], (), pair[1], nodeList[i][2]))
 GiveMeAStatusUpdate('timed arcs', timedArcs)
 
 
 
 
 
-arcsByDepartureNode = defaultdict(list) # (c,r1,t1): [timedArc1, timedArc2, ...]
-arcsByArrivalNode = defaultdict(list) # (c,r2,t2): [timedArc1, timedArc2, ...]
-arcsByCourier = defaultdict(list) # c: [timedArc1, timedArc2, ...]
+arcsByDepartureNode = defaultdict(list) # (g,r1,t1): [timedArc1, timedArc2, ...]
+arcsByArrivalNode = defaultdict(list) # (g,r2,t2): [timedArc1, timedArc2, ...]
+arcsByCourier = defaultdict(list) # g: [timedArc1, timedArc2, ...]
 arcsByOrder = {o: [] for o in orderData}
-outArcsByCourier = {g: [] for g in courierGroups}
-departureArcsByCourierAndRestaurant = defaultdict(list) # (c,r1): [timedArc1, timedArc2, ...]
-arrivalArcsByCourierAndRestaurant = defaultdict(list) # (c,r2): [timedArc1, timedArc2, ...]
+outArcsByCourier = {c: [] for c in courierData}
+departureArcsByCourierAndRestaurant = defaultdict(list) # (g,r1): [timedArc1, timedArc2, ...]
+arrivalArcsByCourierAndRestaurant = defaultdict(list) # (g,r2): [timedArc1, timedArc2, ...]
 arcsByUntimedArc = {u: [] for u in untimedArcData}
 waitingArcsByGroupRestaurant = defaultdict(list)
 
 for arc in timedArcs:
-    (c,r1,t1,s,r2,t2) = arc
-    arcsByDepartureNode[c,r1,t1].append(arc)
-    arcsByArrivalNode[c,r2,t2].append(arc)
-    arcsByCourier[c].append(arc)
-    departureArcsByCourierAndRestaurant[c,r1].append(arc)
-    arrivalArcsByCourierAndRestaurant[c,r2].append(arc)
+    ((g,c),r1,t1,s,r2,t2) = arc
+    arcsByDepartureNode[g,r1,t1].append(arc)
+    arcsByArrivalNode[g,r2,t2].append(arc)
+    arcsByCourier[g].append(arc)
+    departureArcsByCourierAndRestaurant[g,r1].append(arc)
+    arrivalArcsByCourierAndRestaurant[g,r2].append(arc)
     for o in s:
         arcsByOrder[o].append(arc)
-    if r1 == 0:
+    if r1 == 0 and r2 != 0:
         outArcsByCourier[c].append(arc)
     if r1 != r2 or s != ():
-        arcsByUntimedArc[c,s,r2].append(arc)
+        arcsByUntimedArc[(g,c),s,r2].append(arc)
     if r1 == r2 and s == ():
-        waitingArcsByGroupRestaurant[c,r1].append(arc)
+        waitingArcsByGroupRestaurant[g,r1].append(arc)
 
 arcsByDepartureNode = dict(arcsByDepartureNode)
 arcsByArrivalNode = dict(arcsByArrivalNode)
@@ -658,9 +658,9 @@ waitingArcsByGroupRestaurant = dict(waitingArcsByGroupRestaurant)
 for order in arcsByOrder:
     if len(arcsByOrder[order]) == 0:
         print('Error: No timed arcs deliver order ' + str(order) + '!')
-for group in outArcsByCourier:
-    if len(outArcsByCourier[group]) == 0:
-        print('Error: Group ' + str(group) + 'has no entry arcs!')
+for courier in outArcsByCourier:
+    if len(outArcsByCourier[courier]) == 0:
+        print('Error: Courier ' + str(courier) + ' has no entry arcs!')
 for untimedArc in arcsByUntimedArc:
     if len(arcsByUntimedArc[untimedArc]) == 0:
         print('Error: Untimed arc ' + str(untimedArc) + ' has no matching timed arcs!')
@@ -678,37 +678,23 @@ m = Model('MDRP')
 
 arcs = {arc: m.addVar() for arc in timedArcs if arc[2] <= arc[5]}
 doesThisCourierStart = {c: m.addVar() for c in courierData}
-payments = {group: m.addVar() for group in courierGroups}
+# payments = {group: m.addVar() for group in courierGroups}
 
 
 
 
 
-m.setObjective(quicksum(payments[c] for c in courierGroups))
+# m.setObjective(quicksum(payments[g] for g in courierGroups))
 
 
 
 
 
-flowConstraint = {node:
-          m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) 
-                      == quicksum(arcs[arc] for arc in arcsByArrivalNode[node])
-          )
-      for node in nodesInModel if node[1] != 0}
-homeArcs = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) 
-                           <= len(courierGroups[c][0])) for c in courierGroups}
-deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) 
-                                == 1) for o in orderData}
-arcsIffLeaveHome = {c: m.addConstr(
-    quicksum(arcs[arc] for arc in arcsByCourier[c]) <= 
-    quicksum(arcs[arc] for arc in outArcsByCourier[c]) * len(arcsByCourier[c])) 
-    for c in courierGroups}
-paidPerDelivery = {g: m.addConstr(payments[g] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[g]) + quicksum((courierData[c][3] - courierData[c][2]) * minPayPerHour / 60 * (1-doesThisCourierStart[c]) for c in courierGroups[g][0])) for g in courierGroups}
-paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[c][0])) for c in courierGroups}
-courierStartsMatchesNumber = {g: m.addConstr(quicksum(doesThisCourierStart[c]
-                                                      for c in courierGroups[g][0])
-                                             == quicksum(arcs[arc] for arc in outArcsByCourier[g])
-                                             ) for g in courierGroups}
+flowConstraint = {node: m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) == quicksum(arcs[arc] for arc in arcsByArrivalNode[node])) for node in nodesInModel if node[1] != 0}
+outArcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) == doesThisCourierStart[c]) for c in courierData}
+deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) == 1) for o in orderData}
+# paidPerDelivery = {g: m.addConstr(payments[g] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[g]) + quicksum((courierData[c][3] - courierData[c][2]) * minPayPerHour / 60 * (1-doesThisCourierStart[c]) for c in courierGroups[g][0])) for g in courierGroups}
+# paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[c][0])) for c in courierGroups}
 print('Completed main constraints, time = ' + str(time() - programStartTime))
 print()
 
@@ -725,7 +711,7 @@ if addValidInequalityConstraints:
             if arc[1] != (): # not an entry arc, do predecessor valid inequalities
                 validPredecessorUntimedArcs = []
                 leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
-                for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
+                for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0][0], leavingRestaurant)]:
                     if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
                         if set(arc[1]) & set(untimedArc[1]) != set():
                             continue
@@ -737,7 +723,7 @@ if addValidInequalityConstraints:
             if arc[2] != 0: # not an exit arc, do successor valid inequalities
                 validSuccessorUntimedArcs = []
                 _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
-                for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
+                for untimedArc in untimedArcsByCourierRestaurant[(arc[0][0], arc[2])]:
                     if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
                         if set(arc[1]) & set(untimedArc[1]) != set():
                             continue
@@ -771,7 +757,7 @@ if addValidInequalityConstraints:
                 if arc[1] != (): # not an entry arc, do predecessor valid inequalities
                     validPredecessorUntimedArcs = []
                     leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
-                    for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0], leavingRestaurant)]:
+                    for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0][0], leavingRestaurant)]:
                         if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
                             if set(arc[1]) & set(untimedArc[1]) != set():
                                 continue
@@ -788,7 +774,7 @@ if addValidInequalityConstraints:
                 if arc[2] != 0: # not an exit arc, do successor valid inequalities
                     validSuccessorUntimedArcs = []
                     _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
-                    for untimedArc in untimedArcsByCourierRestaurant[(arc[0], arc[2])]:
+                    for untimedArc in untimedArcsByCourierRestaurant[(arc[0][0], arc[2])]:
                         if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
                             if set(arc[1]) & set(untimedArc[1]) != set():
                                 continue
@@ -818,8 +804,8 @@ callbackCuts = []
 def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
     # Take the list of timed arcs, and convert them to untimed arcs
     usedUntimedArcs = []
-    for (g, _, _, s, r2, _) in listOfTimedArcs:
-        untimedArc = (g, s, r2)
+    for ((g,c), _, _, s, r2, _) in listOfTimedArcs:
+        untimedArc = ((g,c), s, r2)
         if untimedArc in usedUntimedArcs:
             print('Error! Duplicate use of untimed arc in solution!', untimedArc)
         usedUntimedArcs.append(untimedArc)
@@ -882,7 +868,7 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
         alternatePredecessorArcs = set()
         alternateSuccessorArcs = set()
         for arc in invalidUntimedArcs:
-            group, _, arrivalRestaurant = arc
+            (group, _), _, arrivalRestaurant = arc
             departureRestaurant, earliestLeavingTime, latestLeavingTime, travelTime = untimedArcData[arc]
             for untimedArc in untimedArcsByCourierNextRestaurant[group, departureRestaurant]:
                 if untimedArc not in usedUntimedArcs:
@@ -915,12 +901,12 @@ def Callback(model, where):
         usedArcsByGroup = {group: [] for group in courierGroups}
         for arc in usedTimedArcs:
             if arc[3] != () or arc[1] != arc[4]:
-                usedArcsByGroup[arc[0]].append(arc)
+                usedArcsByGroup[arc[0][0]].append(arc)
         for group in usedArcsByGroup:
             ComputeAndRemoveMinimalIllegalNetwork(usedArcsByGroup[group])
 
 for arc in arcs:
-    if arc[3] != ():
+    if arc[1] != arc[4] or arc[3] != ():
         arcs[arc].vtype=GRB.BINARY
 
 for courier in doesThisCourierStart:
