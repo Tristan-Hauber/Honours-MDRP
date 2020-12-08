@@ -72,7 +72,6 @@ programStartTime = time()
 
 
 nodeTimeInterval = 8
-# minutes between nodes
 groupCouriersByOffTime = True
 groupCouriersByOnTime = False
 orderProportion = 1
@@ -81,6 +80,7 @@ globalNodeIntervals = True
 addValidInequalityConstraints = True
 addVIRecursively = True
 limitBundlesToSizeOne = False
+considerObjective = True
 
 
 
@@ -681,23 +681,16 @@ m = Model('MDRP')
 
 arcs = {arc: m.addVar() for arc in timedArcs if arc[2] <= arc[5]}
 doesThisCourierStart = {c: m.addVar() for c in courierData}
-# payments = {group: m.addVar() for group in courierGroups}
 
-
-
-
-
-# m.setObjective(quicksum(payments[g] for g in courierGroups))
-
-
-
-
+if considerObjective:
+    payments = {group: m.addVar() for group in courierGroups}
+    m.setObjective(quicksum(payments[g] for g in courierGroups))
+    paidPerDelivery = {g: m.addConstr(payments[g] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[g]) + quicksum((courierData[c][3] - courierData[c][2]) * minPayPerHour / 60 * (1-doesThisCourierStart[c]) for c in courierGroups[g][0])) for g in courierGroups}
+    paidPerTime = {g: m.addConstr(payments[g] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[g][0])) for g in courierGroups}
 
 flowConstraint = {node: m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartureNode[node]) == quicksum(arcs[arc] for arc in arcsByArrivalNode[node])) for node in nodesInModel if node[1] != 0}
 outArcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) == doesThisCourierStart[c]) for c in courierData}
 deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) == 1) for o in orderData}
-# paidPerDelivery = {g: m.addConstr(payments[g] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[g]) + quicksum((courierData[c][3] - courierData[c][2]) * minPayPerHour / 60 * (1-doesThisCourierStart[c]) for c in courierGroups[g][0])) for g in courierGroups}
-# paidPerTime = {g: m.addConstr(payments[g] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[g][0])) for g in courierGroups}
 print('Completed main constraints, time = ' + str(time() - programStartTime))
 print()
 
