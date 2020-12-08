@@ -80,6 +80,7 @@ seed = 1
 globalNodeIntervals = True
 addValidInequalityConstraints = True
 addVIRecursively = True
+limitBundlesToSizeOne = False
 
 
 
@@ -253,6 +254,8 @@ for restaurant in restaurantData:
         calculatedSequences[(order,)] = [restaurant, orderData[order][4], orderData[order][5], TravelTime(restaurantData[restaurant], orderData[order]) + (pickupServiceTime + dropoffServiceTime) / 2]
     for sequence in calculatedSequences:
         sequenceData[sequence] = calculatedSequences[sequence]
+    if limitBundlesToSizeOne:
+        continue
     while len(calculatedSequences) > 0:
         sequenceLength += 1
         newSequences = {}
@@ -694,7 +697,7 @@ flowConstraint = {node: m.addConstr(quicksum(arcs[arc] for arc in arcsByDepartur
 outArcsIffLeaveHome = {c: m.addConstr(quicksum(arcs[arc] for arc in outArcsByCourier[c]) == doesThisCourierStart[c]) for c in courierData}
 deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) == 1) for o in orderData}
 # paidPerDelivery = {g: m.addConstr(payments[g] >= quicksum(arcs[arc] * len(arc[3]) * payPerDelivery for arc in arcsByCourier[g]) + quicksum((courierData[c][3] - courierData[c][2]) * minPayPerHour / 60 * (1-doesThisCourierStart[c]) for c in courierGroups[g][0])) for g in courierGroups}
-# paidPerTime = {c: m.addConstr(payments[c] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[c][0])) for c in courierGroups}
+# paidPerTime = {g: m.addConstr(payments[g] >= quicksum((courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60 for courier in courierGroups[g][0])) for g in courierGroups}
 print('Completed main constraints, time = ' + str(time() - programStartTime))
 print()
 
@@ -918,10 +921,3 @@ m.setParam('OutputFlag', 1)
 m.optimize(Callback)
 
 print('Time = ' + str(time() - programStartTime))
-
-def FindIIS():
-    flowIIS = set(x for x in flowConstraint if flowConstraint[x].IISConstr)
-    orderIIS = set(x for x in deliverOrders if deliverOrders[x].IISConstr)
-    # VI_IIS = set(x for x in VIConstraints if VIConstraints[x].IISConstr)
-    # return {'Flow': flowIIS, 'Order': orderIIS, 'VI': VI_IIS}
-    return {'Flow': flowIIS, 'Order': orderIIS}
