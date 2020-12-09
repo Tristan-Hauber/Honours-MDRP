@@ -29,8 +29,7 @@ Created on Thu Aug  6 15:43:43 2020
 # Improvements:
 # TODO: Put sequence + pair domination into the one function
 # TODO: Revise code to ensure correctness
-# TODO: Add an entry untimed arc for every courier, not just every group
-
+# TODO: Create a function that calculates predecessors and successors
 
 
 
@@ -797,6 +796,7 @@ print('Time = ' + str(time() - programStartTime))
 
 
 callbackCuts = []
+lazyVICuts = []
 def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
     # Take the list of timed arcs, and convert them to untimed arcs
     usedUntimedArcs = []
@@ -823,6 +823,33 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
             predecessorsForArc[arc1].append(arc2)
     successorsForArc = dict(successorsForArc)
     predecessorsForArc = dict(predecessorsForArc)
+    
+    # Add lazy constraints to ensure that all used arcs have successors and predecessors
+    for arc in usedUntimedArcs:
+        if arc not in successorsForArc and arc[2] != 0:
+            earliestArrival = untimedArcData[arc][1] + untimedArcData[arc][3]
+            arrivalRestaurant = arc[2]
+            group = arc[0][0]
+            successors = []
+            for arc2 in untimedArcData:
+                if arc2[0][0] == group and untimedArcData[arc2][0] == arrivalRestaurant and untimedArcData[arc2][2] >= earliestArrival:
+                    successors.append(arc2)
+            if len(successors) == 0:
+                print('Error! Untimed arc has no successors!', arc)
+            m.cbLazy(quicksum(arcs[timedArc] for untimedArc in successors for timedArc in arcsByUntimedArc[untimedArc]) == quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc]))
+            lazyVICuts.append((1, arc, successors))
+        if arc not in predecessorsForArc and arc[1] != ():
+            latestDeparture = untimedArcData[arc][2]
+            departureRestaurant = untimedArcData[arc][0]
+            group = arc[0][0]
+            predecessors = []
+            for arc2 in untimedArcData:
+                if arc2[0][0] == group and arc2[2] == departureRestaurant and untimedArcData[arc2][1] + untimedArcData[arc2][3] <= latestDeparture:
+                    predecessors.append(arc2)
+            if len(predecessors) == 0:
+                print('Error! Untimed arc has no predecessors!', arc)
+            m.cbLazy(quicksum(arcs[timedArc] for untimedArc in predecessors for timedArc in arcsByUntimedArc[untimedArc]) == quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc]))
+            lazyVICuts.append((-1, arc, predecessors))
     
     # Create a new model
     IPD = Model('Illegal Path Determination')
