@@ -30,7 +30,7 @@ Created on Thu Aug  6 15:43:43 2020
 # TODO: Put sequence + pair domination into the one function
 # TODO: Revise code to ensure correctness
 # TODO: Create a function that calculates predecessors and successors
-
+# TODO: Minimise objective in sub problem
 
 
 
@@ -946,37 +946,41 @@ def UntimedArcDepTime(arc):
     return untimedArcData[arc][1]
 usedUntimedArcsByGroup = {g: [] for g in courierGroups}
 journeysByGroup = {}
-for arc in arcs:
-    if arcs[arc].x > 0.01 and (arc[3] != () or arc[1] != arc[4]):
-        usedUntimedArcsByGroup[arc[0][0]].append((arc[0], arc[3], arc[4]))
-for g in usedUntimedArcsByGroup:
-    usedUntimedArcsByGroup[g].sort(key=UntimedArcDepTime)
-    journeys = {} # {c: [currentRestaurant, currentTime, [timedArcsInJourney]]}
-    for arc in usedUntimedArcsByGroup[g]:
-        if arc[0][1] != 0:
-            if arc[0][1] not in journeys:
-                journeys[arc[0][1]] = [arc[2], untimedArcData[arc][1] + untimedArcData[arc][3], [arc]]
+journeySummariesByGroup = {}
+def SummariseModel():
+    for arc in arcs:
+        if arcs[arc].x > 0.01 and (arc[3] != () or arc[1] != arc[4]):
+            usedUntimedArcsByGroup[arc[0][0]].append((arc[0], arc[3], arc[4]))
+    for g in usedUntimedArcsByGroup:
+        usedUntimedArcsByGroup[g].sort(key=UntimedArcDepTime)
+        journeys = {} # {c: [currentRestaurant, currentTime, [timedArcsInJourney]]}
+        for arc in usedUntimedArcsByGroup[g]:
+            if arc[0][1] != 0:
+                if arc[0][1] not in journeys:
+                    journeys[arc[0][1]] = [arc[2], untimedArcData[arc][1] + untimedArcData[arc][3], [arc]]
+                else:
+                    print('Double-up of courier!', g, arc[0][1])
             else:
-                print('Double-up of courier!', g, arc[0][1])
-        else:
-            bestCourier = 0
-            bestTime = globalOffTime
-            reqRestaurant = untimedArcData[arc][0]
-            for c in journeys:
-                if journeys[c][0] == reqRestaurant and journeys[c][1] < bestTime:
-                    bestCourier = c
-                    bestTime = journeys[c][1]
-            if bestCourier == 0:
-                print('Error: No courier found!', g, arc, journeys)
-            else:
-                journeys[bestCourier][0] = arc[2]
-                journeys[bestCourier][1] = min(journeys[bestCourier][1], untimedArcData[arc][1]) + untimedArcData[arc][3]
-                journeys[bestCourier][2].append(arc)
-    journeysByGroup[g] = journeys
-    for c in journeys:
-        summary = "0"
-        for arc in journeys[c][2]:
-            if arc[1] != ():
-                summary += " -> " + str(arc[1])
-            summary += " -> " + str(arc[2])
-        print(c, summary)
+                bestCourier = 0
+                bestTime = globalOffTime
+                reqRestaurant = untimedArcData[arc][0]
+                for c in journeys:
+                    if journeys[c][0] == reqRestaurant and journeys[c][1] < bestTime:
+                        bestCourier = c
+                        bestTime = journeys[c][1]
+                if bestCourier == 0:
+                    
+                    print('Error: No courier found!', g, arc, journeys)
+                else:
+                    journeys[bestCourier][0] = arc[2]
+                    journeys[bestCourier][1] = min(journeys[bestCourier][1], untimedArcData[arc][1]) + untimedArcData[arc][3]
+                    journeys[bestCourier][2].append(arc)
+        journeysByGroup[g] = journeys
+        for c in journeys:
+            summary = "0"
+            for arc in journeys[c][2]:
+                if arc[1] != ():
+                    summary += " -> " + str(arc[1])
+                summary += " -> " + str(arc[2])
+            journeySummariesByGroup[c] = summary
+            print(c, summary)
