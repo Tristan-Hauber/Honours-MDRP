@@ -5,10 +5,6 @@ Created on Thu Aug  6 15:43:43 2020
 @author: Tristan
 """
 
-
-
-
-
 # Program outline
 # Done: Import data
 # Done: If desired, have the ability to cut out some of the data
@@ -26,13 +22,11 @@ Created on Thu Aug  6 15:43:43 2020
 # Done: Solve integer model
 # Done: Add illegal path elimination constraints in callback
 
-# Improvements:
-# TODO: Put sequence + pair domination into the one function
-# TODO: Revise code to ensure correctness
-# TODO: Create a function that calculates predecessors and successors
-# TODO: Minimise objective in sub problem
-
-
+# ============================================================================
+# Setup to problem
+# - Set parameters
+# - Import data
+# ============================================================================
 
 import math
 from collections import defaultdict
@@ -42,33 +36,17 @@ from gurobipy import Model, quicksum, GRB
 import random
 from operator import lt, gt
 
-
-
-
-
 courierData = {} # courier: [x, y, ontime, offtime]
 orderData = {} # order: [x, y, placementtime, restaurant, readytime, latestLeavingTime, maxClickToDoorArrivalTime]
 restaurantData = {} # restaurant: [x, y]
-
-
-
-
 
 sequenceData = {} # orderSequence: [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 sequenceNextRestaurantData = {} # (sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 untimedArcData = {} # (courierGroup, sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 
-
-
-
-
 grubhubInstance = '0o50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 programStartTime = time()
-
-
-
-
 
 nodeTimeInterval = 8
 groupCouriersByOffTime = True
@@ -81,16 +59,8 @@ addVIRecursively = True
 limitBundlesToSizeOne = False
 considerObjective = True
 
-
-
-
-
 def WithoutLetters(string):
     return string.translate({ord(i): None for i in 'abcdefghijklmnopqrstuvwxyz'})
-
-
-
-
 
 def OpenFile(fileName):
     with open(fileDirectory + fileName) as file:
@@ -103,10 +73,6 @@ def OpenFile(fileName):
             dataDictionary[data[0]] = data[1:]
         return dataDictionary
 
-
-
-
-
 courierData = OpenFile('couriers.txt')
 orderData = OpenFile('orders.txt')
 restaurantData = OpenFile('restaurants.txt')
@@ -114,16 +80,8 @@ print(str(len(courierData)) + ' couriers')
 print(str(len(orderData)) + ' orders')
 print(str(len(restaurantData)) + ' restaurants')
 
-
-
-
-
 def GiveMeAStatusUpdate(label, collectionToDisplayLengthOf):
     print(str(len(collectionToDisplayLengthOf)) + ' ' + label + ' ' + str(time() - programStartTime))
-
-
-
-
 
 with open(fileDirectory + 'instance_parameters.txt') as instanceParameters:
     instanceParameters.readline().strip()
@@ -136,17 +94,9 @@ with open(fileDirectory + 'instance_parameters.txt') as instanceParameters:
     payPerDelivery = int(parameters[5]) # dollars
     minPayPerHour = int(parameters[6]) # dollars
 
-
-
-
-
 ordersAtRestaurant = {restaurant: [] for restaurant in restaurantData}
 for order in orderData:
     ordersAtRestaurant[orderData[order][3]].append(order)
-
-
-
-
 
 if orderProportion < 1.0:
     random.seed(seed)
@@ -165,9 +115,6 @@ if orderProportion < 1.0:
     print('Now at ' + str(len(orderData)) + ' orders, down from ' + str(totalOrderCount))
     print()
         
-
-
-
 courierGroups = {}
 if groupCouriersByOffTime:
     if not groupCouriersByOnTime:
@@ -187,18 +134,19 @@ else:
         courierGroups[courier] = [[courier], courierData[courier][3]]
 globalOffTime = max(courierGroups[group][1] for group in courierGroups)
 
-
-
-
+# ============================================================================
+# Sequence and Arc Data Generation
+# - Generate order sequences
+# - Generate sequence-next restaurant pairs
+# - Generate untimed arcs
+# - Generate nodes
+# - Generate timed arcs
+# ============================================================================
 
 def TravelTime(loc1, loc2):
     x1, y1 = loc1[0], loc1[1]
     x2, y2 = loc2[0], loc2[1]
     return math.sqrt((x1-x2)**2 + (y1-y2)**2) / travelSpeed
-
-
-
-
 
 for order in orderData:
     maxClickToDoorArrivalTime = orderData[order][2] + maxClickToDoor
@@ -206,23 +154,11 @@ for order in orderData:
     orderData[order].append(maxClickToDoorArrivalTime - travelTime)
     orderData[order].append(maxClickToDoorArrivalTime)
 
-
-
-
-
 def CompareOneIndex(op, dictionary, key1, key2, index):
     return op(dictionary[key1][index], dictionary[key2][index])
 
-
-
-
-
 def CompareTwoIndices(op1, op2, dictionary, key1, key2, index1, index2):
     return CompareOneIndex(op1, dictionary, key1, key2, index1) and CompareOneIndex(op2, dictionary, key1, key2, index2)
-
-
-
-
 
 def RemoveDominatedSequences(sequences):
     sequencesBySetAndLastOrder = defaultdict(list)
@@ -240,10 +176,6 @@ def RemoveDominatedSequences(sequences):
     for sequence in dominatedSequences:
         del sequences[sequence]
     return sequences
-
-
-
-
 
 # Calculate & dominate order sequences
 for restaurant in restaurantData:
@@ -275,10 +207,6 @@ for restaurant in restaurantData:
         if len(calculatedSequences) == 0:
             break
 
-
-
-
-
 sequencesByRestaurantThenOrderSet = {}
 for sequence in sequenceData:
     restaurant = sequenceData[sequence][0]
@@ -286,10 +214,6 @@ for sequence in sequenceData:
         sequencesByRestaurantThenOrderSet[restaurant] = defaultdict(list)
     sequencesByRestaurantThenOrderSet[restaurant][frozenset(sequence)].append(sequence)
 GiveMeAStatusUpdate('delivery sequences', sequenceData)
-
-
-
-
 
 def CheckDominationPairs(sequenceToCheck, nextRestaurant):
     dominatedSequences = []
@@ -300,10 +224,6 @@ def CheckDominationPairs(sequenceToCheck, nextRestaurant):
             if CompareTwoIndices(gt, lt, sequenceNextRestaurantData, (sequenceToCheck, nextRestaurant), (sequence, nextRestaurant), 2, 3):
                 dominatedSequences.append(sequence)
     return dominatedSequences
-
-
-
-
 
 groupedPairs = defaultdict(list) # (frozenset(sequence), nextRestaurant): [sequence1, sequence2, sequence3, ...]
 for sequence in sequenceData:
@@ -323,10 +243,6 @@ for sequence in sequenceData:
                     break
 groupedPairs = dict(groupedPairs)
 GiveMeAStatusUpdate('post-domination pairs', sequenceNextRestaurantData)
-
-
-
-
 
 untimedArcs = set()
 # {((group1, 0), sequence1, nextRestaurant1), ((group2, 0), sequence2, nextRestaurant2), ...}
@@ -378,10 +294,6 @@ for sequence, nextRestaurant in sequenceNextRestaurantData:
                         untimedArcs.add(((group, 0), sequence, nextRestaurant))
                         untimedArcData[((group, 0), sequence, nextRestaurant)] = [restaurant, earliestDepartureFromDepartureRestaurant, latestDepartureAtDepartureRestaurant, travelTime]
 GiveMeAStatusUpdate('main untimedArcs', untimedArcs)
-
-
-
-
 
 # Exit untimedArcs
 # Create sequence-courier (off time) pairs, with nextRestaurant = 0
@@ -459,10 +371,6 @@ for arc in untimedArcs:
     untimedArcsByCourierNextRestaurant[(arc[0][0], arc[2])].append(arc)
 untimedArcsByCourierRestaurant = dict(untimedArcsByCourierRestaurant)
 untimedArcsByCourierNextRestaurant = dict(untimedArcsByCourierNextRestaurant)
-
-
-
-
 
 nodesInModel = set()
 # A node is a (courierGroup, restaurant, time) triple. If globalNodeIntervals
@@ -620,10 +528,6 @@ for pair in nodesByOfftimeRestaurantPair:
             timedArcs.add(((pair[0],0), pair[1], nodeList[i-1][2], (), pair[1], nodeList[i][2]))
 GiveMeAStatusUpdate('timed arcs', timedArcs)
 
-
-
-
-
 arcsByDepartureNode = defaultdict(list) # (g,r1,t1): [timedArc1, timedArc2, ...]
 arcsByArrivalNode = defaultdict(list) # (g,r2,t2): [timedArc1, timedArc2, ...]
 arcsByCourier = defaultdict(list) # g: [timedArc1, timedArc2, ...]
@@ -667,16 +571,15 @@ for untimedArc in arcsByUntimedArc:
     if len(arcsByUntimedArc[untimedArc]) == 0:
         print('Error: Untimed arc ' + str(untimedArc) + ' has no matching timed arcs!')
 
-
-
-
+# ============================================================================
+# Model Setup
+# - Set variables
+# - Set objective
+# - Set general constraints
+# ============================================================================
 
 print()
 m = Model('MDRP')
-
-
-
-
 
 arcs = {arc: m.addVar() for arc in timedArcs if arc[2] <= arc[5]}
 doesThisCourierStart = {c: m.addVar() for c in courierData}
@@ -693,9 +596,12 @@ deliverOrders = {o: m.addConstr(quicksum(arcs[arc] for arc in arcsByOrder[o]) ==
 print('Completed main constraints, time = ' + str(time() - programStartTime))
 print()
 
-
-
-
+# ============================================================================
+# Model Solving
+# - Solve linear model/Add VI constraints
+# - Convert to MIP
+# - Solve callback
+# ============================================================================
 
 if addValidInequalityConstraints:
     if not addVIRecursively:
@@ -791,9 +697,6 @@ if addValidInequalityConstraints:
                 break
 print()
 print('Time = ' + str(time() - programStartTime))
-
-
-
 
 callbackCuts = []
 lazyVICuts = []
@@ -941,6 +844,10 @@ m.setParam('OutputFlag', 1)
 m.optimize(Callback)
 
 print('Time = ' + str(time() - programStartTime))
+
+# ============================================================================
+# Solution results
+# ============================================================================
 
 def UntimedArcDepTime(arc):
     return untimedArcData[arc][1]
