@@ -111,6 +111,7 @@ if orderProportion < 1.0:
         restaurantsRemoved.append(removedRestaurant)
     print()
     print('Seed = ' + str(seed))
+    print('Proportion =', orderProportion)
     print('Removed restaurants ' + str(restaurantsRemoved))
     print('Now at ' + str(len(orderData)) + ' orders, down from ' + str(totalOrderCount))
     print()
@@ -703,11 +704,14 @@ lazyVICuts = []
 def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
     # Take the list of timed arcs, and convert them to untimed arcs
     usedUntimedArcs = []
+    usedCouriers = set()
     for ((g,c), _, _, s, r2, _) in listOfTimedArcs:
         untimedArc = ((g,c), s, r2)
         if untimedArc in usedUntimedArcs:
             print('Error! Duplicate use of untimed arc in solution!', untimedArc)
         usedUntimedArcs.append(untimedArc)
+        if c != 0:
+            usedCouriers.add(c)
     
     # Find all possible predecessor-successor pairs
     successorsForArc = defaultdict(list)
@@ -753,19 +757,36 @@ def ComputeAndRemoveMinimalIllegalNetwork(listOfTimedArcs):
                 print('Error! Untimed arc has no predecessors!', arc)
             m.cbLazy(quicksum(arcs[timedArc] for untimedArc in predecessors for timedArc in arcsByUntimedArc[untimedArc]) == quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc]))
             lazyVICuts.append((-1, arc, predecessors))
-    
+            
     # Create a new model
     IPD = Model('Illegal Path Determination')
     X = {(arc, successor): IPD.addVar(vtype=GRB.BINARY) for arc in successorsForArc for successor in successorsForArc[arc]}
+    Y = {(courier, arc): IPD.addVar(vtype=GRB.BINARY) for courier in usedCouriers for arc in usedUntimedArcs}
+    Z = {courier: IPD.addVar() for courier in usedCouriers}
     T = {arc: IPD.addVar() for arc in usedUntimedArcs}
-    
+    # T constraints
     leaveAfterEarlyTime = {arc: IPD.addConstr(T[arc] >= untimedArcData[arc][1]) for arc in usedUntimedArcs}
     leaveBeforeLateTime = {arc: IPD.addConstr(T[arc] <= untimedArcData[arc][2]) for arc in usedUntimedArcs}
+    # X constraints
     enoughTimeForBothArcs = {(i,j): IPD.addConstr(T[i]+untimedArcData[i][3] <= T[j] + 
                                   (untimedArcData[i][2]+untimedArcData[i][3]-untimedArcData[j][1])*(1-X[i,j]))
                               for (i,j) in X}
     predecessorArcsUsedOnce = {i: IPD.addConstr(quicksum(X[i,j] for j in successorsForArc[i]) == 1) for i in successorsForArc}
     successorArcsUsedOnce = {j: IPD.addConstr(quicksum(X[i,j] for i in predecessorsForArc[j]) == 1) for j in predecessorsForArc}
+    # Y constraints
+    oneCourierDeliversPair = {}
+    for courier in usedCouriers:
+        for (arc, successor) in X:
+            oneCourierDeliversPair[(courier, arc, successor)] = IPD.addConstr(X[arc, successor] + Y[courier, arc] - 1 <= Y[courier, successor])
+    eachArcOneCourier = {arc: IPD.addConstr(quicksum(Y[courier, arc] for courier in usedCouriers) == 1) for arc in usedUntimedArcs if arc[0][1] == 0}
+    eachCourierOwnStart = {courier: IPD.addConstr(quicksum(Y[courier, arc] for arc in usedUntimedArcs if arc[0][1] == courier) == 1) for courier in usedCouriers}
+    # Z constraints
+    courierPayPerDelivery = {}
+    for courier in usedCouriers:
+        courierPayPerDelivery[courier] = IPD.addConstr(Z[courier] >= quicksum(Y[courier, arc] * len(arc[1]) * payPerDelivery for arc in usedUntimedArcs))
+    courierPayPerTime = {courier: IPD.addConstr(Z[courier] >= (courierData[courier][3] - courierData[courier][2]) * minPayPerHour / 60)}
+    # Objective
+    IPD.setObjective(quicksum(Z[courier] for courier in usedCouriers))
     
     # Solve the model
     IPD.setParam('OutputFlag', 0)
@@ -829,7 +850,8 @@ def Callback(model, where):
             if arc[3] != () or arc[1] != arc[4]:
                 usedArcsByGroup[arc[0][0]].append(arc)
         for group in usedArcsByGroup:
-            ComputeAndRemoveMinimalIllegalNetwork(usedArcsByGroup[group])
+            if len(usedArcsByGroup[group]) > 0:
+                ComputeAndRemoveMinimalIllegalNetwork(usedArcsByGroup[group])
 
 for arc in arcs:
     if arc[1] != arc[4] or arc[3] != ():
