@@ -373,6 +373,43 @@ for arc in untimedArcs:
 untimedArcsByCourierRestaurant = dict(untimedArcsByCourierRestaurant)
 untimedArcsByCourierNextRestaurant = dict(untimedArcsByCourierNextRestaurant)
 
+# ============================================================================
+# Calculate predecessors and successors for untimed arcs, and save this
+# information in an easy-to-access dictionary
+
+def CalculatePredecessorsFromUntimedArc(untimedArc):
+    foundPredecessors = []
+    if untimedArc[1] != ():
+        ((group, _), _, nextRestaurant) = untimedArc
+        latestLeavingTime = untimedArcData[untimedArc][2]
+        for arc in untimedArcsByCourierRestaurant[group, nextRestaurant]:
+            (_, earliestPredLeavingTime, _, predTravelTime) = untimedArcData[arc]
+            if earliestPredLeavingTime + predTravelTime <= latestLeavingTime:
+                foundPredecessors.append(arc)
+    return foundPredecessors
+
+def CalculateSuccessorsFromUntimedArc(untimedArc):
+    ((group, _), _, arrivalRestaurant) = untimedArc
+    foundSuccessors = []
+    if arrivalRestaurant != 0:
+        (_, earliestLeavingTime, _, travelTime) = untimedArcData[untimedArc]
+        earliestArrivalTime = earliestLeavingTime + travelTime
+        for arc in untimedArcsByCourierRestaurant[group, arrivalRestaurant]:
+            latestSucDepartureTime = untimedArcData[arc][2]
+            if earliestArrivalTime <= latestSucDepartureTime:
+                foundSuccessors.append(arc)
+    return foundSuccessors
+
+predecessorsForUntimedArc = {arc: [] for arc in untimedArcData}
+successorsForUntimedArc = {arc: [] for arc in untimedArcData}    
+
+for arc in untimedArcData:
+    predecessorsForUntimedArc[arc] = CalculatePredecessorsFromUntimedArc(arc)
+    successorsForUntimedArc[arc] = CalculateSuccessorsFromUntimedArc(arc)
+
+print('Completed predecessor and successor calculations', time() - programStartTime)
+# ============================================================================
+
 nodesInModel = set()
 # A node is a (courierGroup, restaurant, time) triple. If globalNodeIntervals
 # is set to True, then node times will be integer multiples of the 
