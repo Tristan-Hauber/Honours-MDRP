@@ -1,0 +1,174 @@
+ \documentclass{article}
+
+\usepackage{amsfonts} % \mathbb
+\usepackage{mathtools} % \begin{align}
+
+\newcommand{\Pred}{\text{Pred}}
+\newcommand{\Suc}{\text{Suc}}
+ 
+\begin{document}
+
+\tableofcontents{}
+
+\section{Literature Review}
+
+Dynamic vehicle routing problems (dVRP)
+
+Dynamic delivery problems (dDP)
+
+Dynamic pickup-and-delivery problems (dPDP)
+
+Path fragments formulation
+
+\section{Problem Description}
+
+Customers order meals to be delivered to their homes. Each meal is placed at a restaurant at a certain time. Meal delivery 'couriers' pick up these meals from the restaurants and deliver them to the customers. Each courier has its own start location, shift start time and shift end time. A courier is able to pick up multiple orders at once from the same restaurant, but once the courier has departed to deliver those meals, it is constrained to finish delivering them before it can return to any restaurant to pick up new meals. A courier may pick up meals at any time during their shift, and when they reach the end of their shift, they may continue delivering any meals that they have already picked up. However, a courier may not pick up any new meals after their shift has formally ended. All travel times between locations are known. We assume that the decision maker is clairvoyant; that is, we know before-hand where and when every meal order will be placed. Secondly, we assume that the couriers will deliver any and all meals assigned to them; that is, we assume that they are not autonomous decision makers.
+
+\section{Mathematical Problem Formulation}
+
+Within a city or region, there is a set of restaurants. Let this set be denoted by $R$. Each restaurant $r\in R$ has grid coordinates $x_r$ and $y_r$, and its location $\ell_r=(x_r, y_r)$.
+
+There is also a set of couriers; let this be denoted by $C$. Each courier $c\in C$ has a starting location given by grid coordinates $x_c$ and $y_c$. Their shift begins at time $e_c$ and ends at time $l_c>e_c$. At a courier's shift's start time, they are at location $\ell_c=(x_c, y_c)$.
+
+Each meal is ordered from a restaurant. Let the set of meal orders be denoted by $O$. Each meal $o\in O$ is ordered from restaurant $r_o\in R$ at time $a_o$. The meal is ready for pickup from restaurant $r_o$ at time $e_o$, and must be delivered to location $\ell_o$ at grid coordinates $x_o$, $y_o$ before time $a_o+\varrho$, where $\varrho$ is the maximum allowed click-to-door time.
+
+In order to work with the path fragments method, we define a set of bundles $B$ as follows. A bundle $b\in B$ is an ordered set of meal orders $b=(o_1, \dots, o_k)$, $o_i\in O$, $i=1,\dots,k$, $k\geq 1$. All orders in a bundle are ordered from restaurant $r_b\in R$, that is, $r_o=r_b$ for all $o\in b$. The ready time of a bundle $e_b=\max\{e_o\}, o\in b$ is the latest ready time of any of the meal orders within the bundle. $O(b)$ denotes the unordered set of orders in bundle $b$.
+
+We further define the empty bundle; the empty bundle is the empty set and denoted by $\emptyset$. Since this bundle contains no meal orders, $O(\emptyset)=\emptyset$ and we define $e_\emptyset=0$.
+
+Let $L=\{\ell_r\}\cup\{\ell_c\}\cup\{\ell_o\}$ denote the set of all locations. All couriers travel with the same speed, and take time $t_{ij}$ to travel between locations $i,j\in L$. In addition, couriers require a certain amount of service time $v_1$ to walk from their vehicle to the restaurant, pick up the meal, and walk back to their vehicle, and they take an amount of time $v_2$ to walk from their vehicle to deliver an order and walk back to their vehicle.
+
+A courier is paid for their work via two metrics. Every courier is paid for every meal they deliver at a rate of $p_1$. However, couriers are also guaranteed some minimum pay per hour $p_c\geq 0$. Combining these two figures, each courier $c\in C$ is paid a total renumeration of $\max\{p_1n, p_c(l_c-e_c)\}$, where $n$ is the total number of orders that courier delivers.
+
+\section{Solution Description}
+
+The solution implemented is a two step process. Firstly, time is discretised. Nodes are placed at restaurants with path fragments generated that travel between them, with an additional node at a designated 'home'. The home node could be thought of as a depot for the couriers. A path fragment between nodes is called a timed arc, and there are four types of these timed arcs within the model; entry, exit, delivery and waiting timed arcs.
+
+An entry timed arc is a timed arc from the depot node to a restaurant node, and is assigned to a specific courier. There is at least one of these arcs for every courier, and at most one for every courier-restaurant pair. A waiting timed arc goes from one restaurant node to the next node at that same restaurant. Each waiting timed arc can be assigned to multiple couriers.
+
+A delivery timed arc goes from a node at a restaurant, to another node at a restaurant, and has an assigned bundle. The nodes could be at the same or different restaurants, but the time of the second node must be equal to or later than the time of the first node. There is no more than one of these for every node-node-bundle triple. Each one can be assigned to any of multiple couriers, but can only be assigned to a maximum of one courier.
+
+An exit timed arc goes from a node at a restaurant to the depot, and has an assigned bundle. There is at most one of these for every node and bundle pair. Each one can be assigned up to a maximum of one courier.
+
+Once all the timed arcs have been generated, the model then assigns some of the path segments to couriers in a way that it minimises the total courier payout, but subject to a number of constraints:
+
+\begin{itemize}
+\item Couriers need not be assigned any arcs
+\item Arcs need not be assigned to a courier
+\item Every order must be assigned to a courier exactly once; that is, exactly one delivery or exit arc with an assigned bundle containing order $o$ must be assigned to a courier
+\item The number of arcs departing a node is the same as the number of arcs arriving at that same node
+\end{itemize}
+
+Due to the time discretisation, a solution through the network may not, in reality, be possible. To solve this problem, we move to the second stage in the solution in order to prune off invalid solutions found in the first stage, by removing the discretisation.
+
+For the second stage of solving, we change the path fragments' form from going from one location to another, to delivering one bundle and then another. A variable is created for each possible ordered pair of bundles (an ordered pair is possible if one can be completed, and then the next), the assignment of couriers to bundles, and the time at which each bundle is picked up to be delivered. Worthy to note here is that the bundles considered are exactly the bundles that were part of the solution in the first stage.
+
+This model is solved to feasibility, attempting to assign each bundle to a courier and a delivery time. If one bundle follows another, they must be assigned to the same courier, and the time at which they are delivered must be long enough apart that the courier can finish servicing the first one before it starts on the second one.
+
+If the model successfully solves, then the solution found in the discretisation stage was a valid solution. If the model comes out as infeasible, we know that it was not quite possible, and so a feasibility cut is made to the discretised model to remove that given solution.
+
+In order to speed up the overall process, we added the ability to split the couriers up into groups of couriers. The groups could contain any number of couriers, but all couriers in the same group must have the same end-shift time. This addition of groups has a follow-on effect for the formulation.
+
+Firstly, nodes are duplicated for each group. Because of this, a node is defined by three values; a restaurant, a time, and a courier group. In the arc generation, each arc has a number of possible groups it can be assigned to. Entry arcs are created for courier-restaurant pairs, and then assigned to the group that the courier is in. Waiting arcs are duplicated for each group, and delivery and exit arcs are copied over to groups where servicing of that arc is possible. The same constraints hold as above, but since each node and arc also takes into account a group, the final constraint is tighter.
+
+Since we are now working with groups of couriers instead of individual couriers, we cannot precisely determine the objective value. Instead, we approximate the objective value for each group in the discretised time stage, and solve for optimality on the approximate objective value.
+
+Once the discretised model puts forth a potential solution, we then evaluate this solution within each courier group for feasibility and optimality. The timed arcs are split up into groups based on which courier group they belong to, and then each group of corresponding untimed arcs are solved to optimality with the objective value in mind. Once again, if this sub model is infeasible, a feasibility cut is made to remove that group of arcs as a possibility, but if feasible, an optimality cut is made to refine the objective value of the main model.
+
+\section{Mathematical Solution Formulation}
+
+We introduce the notation for a courier group. Let $G$ denote the set of courier groups. A group $g\in G$ is a set of couriers such that every courier within the group shares a shift end-time. The set of couriers within a group $g$ is denoted by $C(g)$. The off-time of a group $l_g$ is the time that every courier within the group ends their shift at, that is, $l_g=l_c$ for all $c\in C(g)$.
+
+Before the creation of timed arcs, we define a set of untimed path segments, or "untimed arcs" that will be converted into timed arcs. Let $U$ be the set of untimed arcs. Every untimed arc $u\in U$ has an associated group $g_u\in G$, an associated courier $c_u\in C(g)\cup \{0\}$, an associated bundle $b_u\in B$, and an associated 'next restaurant' $\rho_u\in R$ that the courier travels to after servicing the bundle $b_u$. If $c_u=0$, then that means this untimed arc can be serviced by any courier $c\in C(g)$. If $c_u\neq 0$, then the untimed arc must be serviced by courier $c_u$. 
+
+Each untimed arc also has an associated earliest leaving time $e_u$, an associated latest leaving time $\varepsilon_u$, and an associated total travel time $t_u$. The earliest leaving time is the later of the earliest a courier within the group can get to restaurant $r_{b_u}$ and $\max(e_o)$, $o\in O(b)$. The latest leaving time is the latest the courier can leave the restaurant in order to deliver all orders $o\in O(b)$ before time $a_o+\varrho$. The travel time is $t_u=\sum_{i=1}^{n+1}t_{\ell_i,\ell_i+1}$, where $\{\ell_i\}_{i=1}^{n+2}=\{\ell_{r_{b_u}}, \ell_{o_1}, \dots, \ell_{o_n}, \ell_{\rho_u}\}$, $o_i$ is the $i^{th}$ order in $b_u$.
+
+\subsection{Discretised Time Solution}
+
+Let $N$ denote the set of all nodes. A node $n\in N$ has an associated courier group $g_n\in G$, restaurant $r_n\in R\cup\{0\}$, and time value $t_n$. If $r_n=0$, then this node is located at the depot. The set of nodes associated with a certain courier group $g\in G$ is given by $N(g)$. Let $D$ denote the set of nodes that are not located at the depot.
+
+Taking the set of untimed arcs, we convert them into timed arcs, or timed path segments. Let $A$ denote the set of timed arcs. Each timed arc has an associated courier group $g_a\in G$, courier $c_a\in C(g_a)$, bundle $b_a\in B$, departure restaurant $r_b$, arrival restaurant $r_a$, departure time $e_a$, and arrival time $\varepsilon_a$. Timed arcs connect two nodes, that is, $(g_a, r_b, e_a), (g_a, r_a, \varepsilon_a)\in N$, and a timed arc has a base untimed arc from which it is created, that is, $(g_a, c_a, b_a, r_a)=u_a\in U$. Let the set of all timed arcs that have untimed arc $u$ as their base arc be denoted by $A(u)$. Let the set of timed arcs that depart from node $n\in N$ be denoted by $A(n)$, and the set of timed arcs that arrive at node $n$ be denoted by $A'(n)$.
+
+We now define a number of sets to help with the construction of the constraints.
+
+$\text{Out}(c)$ denotes the set of timed arcs, serviceable by courier $c\in C$, such that the departure node is the designated 'depot node'. $A(o)$ denotes the set of timed arcs such that the order $o\in O$ is in the corresponding bundle.
+
+We now define the variables used to solve the time discretised model.
+
+\begin{itemize}
+\item $X_a=\begin{cases}1&\text{if the timed arc }a\in A\text{ is used}\\0&\text{otherwise}\end{cases}$
+\item $Y_c=\begin{cases}1&\text{if the courier }c\in C\text{ delivers at least one order}\\0&\text{otherwise}\end{cases}$
+\item $P_g\in\mathbb R$ is the sum of the payments given to couriers $c\in g$, $\forall~g\in G$
+\end{itemize}
+
+The objective is to minimise $$\sum_{g\in G}P_g,$$ that is, the total payments given to all couriers.
+
+The constraints are as follows:
+
+\begin{align}
+\sum_{a\in A'(n)}X_a=\sum_{a\in A(n)}X_a&&\forall n\in N\\
+\sum_{a\in\text{Out}(c)}X_a=Y_c&&\forall c\in C\\
+\sum_{a\in A(o)}X_a=1&&\forall o\in O\\
+P_g\geq\sum_{c\in C(g)}\frac{p_c(l_c-e_c)}{60}&&\forall g\in G\\
+P_g\geq\sum_{c\in C(g)}\frac{p_c(l_c-e_c)(1-Y_c)}{60} + \sum_{a\in A(g)}p_1|b_a|X_a&&\forall g\in G
+\end{align}
+
+Constraints (1) are flow constraints, that is, they ensure that every node has the same number of activated arcs flowing in and out of them.  Constraints (2) restrict the activation of entry arcs to only those couriers who are used to deliver at least one order. Constraints (3) ensure that each order is delivered precisely once. Constraints (4) and (5) give a lower bound approximation of the objective value for a group of couriers, refined when solving the sub-problem.
+
+\subsection{Continuous Time Callback}
+
+For the sub-model, we start with a set of arcs. These are the arcs that were activated in the first model.
+
+Let $A^*$ be the set of timed arcs that were activated in the first model. That is, $a\in A^*\leftrightarrow X_a=1$.
+
+Let $U^*$ be the set of untimed arcs that correspond to arcs in $A^*$. That is, $A(U^*)=A^*$.
+
+Let $U^*(g)$ be the set of untimed arcs that can be serviced by couriers in group $g\in G$. That is, $U^*(g)=U^*\cap U(g)$.
+
+It will be convenient to define two subsets of $U$. Let $\Suc(u)\subset U$ and $\Pred(u)\subset U$, where $u\in U$. $\Pred(u)$ is the set of predecessors of untimed arc $u\in U$, while $\Suc(u)$ is the set of successors of $u\in U$. Informally, a predecessor of an arc is one that can finish at a restaurant before the next arc needs to leave that restaurant, and similarly a successor of an arc is an arc that can leave after the first arc arrives at a restaurant. Formally, $u_1$ is a predecessor of $u_2$ if:
+\begin{itemize}
+\item $u_1$ is not an exit arc;
+\item $u_1$ and $u_2$ have the same courier group index;
+\item $u_1$ and $u_2$ do not share any orders in their order sequence;
+\item The arrival restaurant of arc $u_1$ is the same restaurant as the departure restaurant in arc $u_2$;
+\item The earliest leaving time plus the travel time of arc $u_1$ is less than or equal to the latest leaving time of arc $u_2$.
+\end{itemize}
+
+Untimed arc $u_2$ is a successor of arc $u_1$ if and only if $u_1$ is a predecessor of $u_2$.
+
+When solving the continuous time model, we consider each courier group $g\in G$ separately. That is, we only consider one group $U^*(g)$ at a time.
+
+We start off by ensuring that every used non-entry untimed arc has a predecessor and every used non-exit untimed arc has a successor. For each arc found that doesn't match these conditions, we add a valid inequality cut of the form [insert equation here] on that arc, to ensure that they can be part of the network.
+
+If every untimed arc fulfils the above conditions, we continue checking for feasibility. The next step is to define four decision variables for every group $g\in G$:
+\begin{itemize}
+\item $X_{u_1u_2}=\begin{cases}1&\text{if the courier servicing arc $u_1\in U^*(g)$ next services arc $u_2\in\Suc(u_1)$}\\0&\text{otherwise}\end{cases}$
+\item $Y_{cu}=\begin{cases}1&\text{if courier $c\in C(g)$ services arc $u\in U^*(g)$}\\0&\text{otherwise}\end{cases}$
+\item $Z_c\geq0$ is the payment given to courier $c\in C(g)$
+\item $T_u\geq0$ is the time at which arc $u\in U^*(g)$ begins to be serviced
+\end{itemize}
+
+The purpose of this model is to check for feasibility while minimising the total payment handed out to all the couriers within the group. To do so, it must calculate valid routes for each individual courier. This is done using the following constraints:
+
+$\text{minimise}\sum_{c\in C(g)}Z_c$, such that:
+\begin{align}
+\sum_{u_1\in\Pred(u_2)}X_{u_1u_2}=1&&\forall u_2\in U^*(g)\\
+\sum_{u_2\in\Suc(u_1)}X_{u_1u_2}=1&&\forall u_1\in U^*(g)\\
+\sum_{c\in C(g)}Y_{cu}=1&&\forall u\in U^*(g)\\
+Y_{cu_1}+X_{u_1u_2}-1\leq Y_{cu_2}&&\forall u_1\in U^*(g),\forall u_2\in\Suc(u_1)\\
+Z_c\geq\frac{p_c(e_c-b_c)}{60}&&\forall c\in C(g)\\
+Z_c\geq\sum_{u\in U^*(g)}p_1|s_u|Y_{cu}&&\forall c\in C(g)\\
+e_u\leq T_u\leq\varepsilon_u&&\forall u\in U^*(g)\\
+T_{u_1}+t_{u_1}\leq T_{u_2}+M_{u_1u_2}(1-X_{u_1u_2})&&\forall u_1\in U^*(g),\forall u_2\in\Suc(u_1)
+\end{align}
+
+$M_{u_1u_2}$ can be any sufficiently large number. However, it has a lower bound. In order for constraints (13) to work, $M_{u_1u_2}\geq e_{u_1}+\lambda_{u_1}-b_{u_2}$, and setting the equality minimises $M$.
+
+Constraints (6) and (7) ensure that every arc has a predecessor and a successor. These are the most important constraints - once we know the predecessor and successor of every arc, we can determine the route of every courier through the network. Constraints (8) ensure that every arc is assigned to a courier, while constraints (9) ensure that the same courier is assigned for consecutively serviced arcs. Constraints (10) and (11) ensure minimum payment for each courier within the group is set. Constraints (12) ensure all the arcs are serviced on-time, while constraints (13) keep time consistency between consecutively serviced arcs.
+
+[Fix voice! Currently passive]
+The sub problem would be solved, and come out with one of two options. Either the problem would come out feasible, or infeasible. If feasible, then the model represents a valid sub-network. We add an optimality cut to the objective value in the main problem, and store this sub network as a valid solution.
+
+If the sub-model comes out as infeasible, we do some further work on it to produce a cut on the main problem. First, we compute the Irreducible Infeasible Subsystem (IIS) of the sub-problem. Once this is calculated, we determine which of the constraints (4) or (5) made the problem infeasible. We then add a feasibility cut to the main problem of the form \begin{align}\sum_{u\in \text{IIS}}\sum_{a\in A^*(u)}X_a\leq|U^*(g)|-1+\sum_{u\in \text{IIS}}\sum_{v\in\Suc(u)\backslash U^*(g)}\sum_{a\in A^*(v)}X_a\end{align} where $X_a$ is the variable from the main model. Constraint (11) forces the model to bring in at least one previously unused successor if it chooses to use the set of arcs contained within the IIS. Worthy to note is that the equivalent constraint \begin{align}\sum_{u\in \text{IIS}}\sum_{a\in A^*(u)}X_a\leq|U^*(g)|-1+\sum_{u\in \text{IIS}}\sum_{v\in\Pred(u)\backslash U^*(g)}\sum_{a\in A^*(v)}X_a\end{align} where $v\in\Suc(u)\backslash U^*(g)$ is replaced by $v\in\Pred(u)\backslash U^*(g)$, could replace (11) and it would have the same effect on the solution.
+
+\end{document}
