@@ -380,23 +380,25 @@ untimedArcsByCourierNextRestaurant = dict(untimedArcsByCourierNextRestaurant)
 def CalculatePredecessorsFromUntimedArc(untimedArc):
     foundPredecessors = []
     if untimedArc[1] != ():
-        ((group, _), _, nextRestaurant) = untimedArc
+        ((group, _), successorOrders, nextRestaurant) = untimedArc
         latestLeavingTime = untimedArcData[untimedArc][2]
         for arc in untimedArcsByCourierRestaurant[group, nextRestaurant]:
             (_, earliestPredLeavingTime, _, predTravelTime) = untimedArcData[arc]
-            if earliestPredLeavingTime + predTravelTime <= latestLeavingTime:
+            predecessorOrders = arc[1]
+            if earliestPredLeavingTime + predTravelTime <= latestLeavingTime and set(successorOrders) & set(predecessorOrders) == set():
                 foundPredecessors.append(arc)
     return foundPredecessors
 
 def CalculateSuccessorsFromUntimedArc(untimedArc):
-    ((group, _), _, arrivalRestaurant) = untimedArc
+    ((group, _), predecessorOrders, arrivalRestaurant) = untimedArc
     foundSuccessors = []
     if arrivalRestaurant != 0:
         (_, earliestLeavingTime, _, travelTime) = untimedArcData[untimedArc]
         earliestArrivalTime = earliestLeavingTime + travelTime
         for arc in untimedArcsByCourierRestaurant[group, arrivalRestaurant]:
             latestSucDepartureTime = untimedArcData[arc][2]
-            if earliestArrivalTime <= latestSucDepartureTime:
+            successorOrders = arc[1]
+            if earliestArrivalTime <= latestSucDepartureTime and set(successorOrders) & set(predecessorOrders) == set():
                 foundSuccessors.append(arc)
     return foundSuccessors
 
@@ -646,31 +648,18 @@ if addValidInequalityConstraints:
         print('Adding all VI constraints')
         # Code for doing all VIs:
         VIConstraints = {}
-        for arc in untimedArcs:
-            if arc[1] != (): # not an entry arc, do predecessor valid inequalities
-                validPredecessorUntimedArcs = []
-                leavingRestaurant, _, latestLeavingTime, _ = untimedArcData[arc]
-                for untimedArc in untimedArcsByCourierNextRestaurant[(arc[0][0], leavingRestaurant)]:
-                    if untimedArcData[untimedArc][1] + untimedArcData[untimedArc][3] <= latestLeavingTime:
-                        if set(arc[1]) & set(untimedArc[1]) != set():
-                            continue
-                        validPredecessorUntimedArcs.append(untimedArc)
-                if len(validPredecessorUntimedArcs) == 0:
-                    print('No predecessor arcs', arc)
-                VIConstraints[(-1,arc,tuple(validPredecessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                            <= quicksum(arcs[timedArc] for untimedArc in validPredecessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
-            if arc[2] != 0: # not an exit arc, do successor valid inequalities
-                validSuccessorUntimedArcs = []
-                _, earliestLeavingTime, _, travelTime = untimedArcData[arc]
-                for untimedArc in untimedArcsByCourierRestaurant[(arc[0][0], arc[2])]:
-                    if untimedArcData[untimedArc][2] >= earliestLeavingTime + travelTime:
-                        if set(arc[1]) & set(untimedArc[1]) != set():
-                            continue
-                        validSuccessorUntimedArcs.append(untimedArc)
-                if len(validSuccessorUntimedArcs) == 0:
-                    print('No successor arcs', arc)
-                VIConstraints[(1,arc,tuple(validSuccessorUntimedArcs))] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc])
-                            <= quicksum(arcs[timedArc] for untimedArc in validSuccessorUntimedArcs for timedArc in arcsByUntimedArc[untimedArc]))
+        for arc in untimedArcData:
+            
+            if len(predecessorsForUntimedArc[arc]) > 0:
+                predecessors = predecessorsForUntimedArc[arc]
+                VIConstraints[(-1, arc)] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc]) <=
+                    quicksum(arcs[timedArc] for untimedArc in predecessors for timedArc in arcsByUntimedArc[untimedArc]))
+            
+            if len(successorsForUntimedArc[arc]) > 0:
+                successors = successorsForUntimedArc[arc]
+                VIConstraints[(1, arc)] = m.addConstr(quicksum(arcs[timedArc] for timedArc in arcsByUntimedArc[arc]) <=
+                    quicksum(arcs[timedArc] for untimedArc in successors for timedArc in arcsByUntimedArc[untimedArc]))
+        
         GiveMeAStatusUpdate('VI Constraints', VIConstraints)
         m.optimize()
     
