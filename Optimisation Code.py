@@ -44,7 +44,7 @@ sequenceData = {} # orderSequence: [placementRestaurant, earliestDepartureTime, 
 sequenceNextRestaurantData = {} # (sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 untimedArcData = {} # (courierGroup, sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 
-grubhubInstance = '0o50t100s1p125'
+grubhubInstance = '0o100t100s1p100'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 programStartTime = time()
 
@@ -147,7 +147,7 @@ globalOffTime = max(courierGroups[group][1] for group in courierGroups)
 def TravelTime(loc1, loc2):
     x1, y1 = loc1[0], loc1[1]
     x2, y2 = loc2[0], loc2[1]
-    return math.sqrt((x1-x2)**2 + (y1-y2)**2) / travelSpeed
+    return math.ceil(math.sqrt((x1-x2)**2 + (y1-y2)**2) / travelSpeed)
 
 for order in orderData:
     maxClickToDoorArrivalTime = orderData[order][2] + maxClickToDoor
