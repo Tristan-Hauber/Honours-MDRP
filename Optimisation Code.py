@@ -37,14 +37,14 @@ import random
 from operator import lt, gt
 
 courierData = {} # courier: [x, y, ontime, offtime]
-orderData = {} # order: [x, y, placementtime, restaurant, readytime, latestLeavingTime, maxClickToDoorArrivalTime]
+orderData = {} # order: [x, y, placementtime, restaurant, readytime, latestLeavingTime, maxClickToDoorArrivalTime, timeToDelivery]
 restaurantData = {} # restaurant: [x, y]
 
 sequenceData = {} # orderSequence: [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 sequenceNextRestaurantData = {} # (sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 untimedArcData = {} # (courierGroup, sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 
-grubhubInstance = '0o100t100s1p100'
+grubhubInstance = '0o50t100s1p125'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 programStartTime = time()
 
@@ -154,6 +154,7 @@ for order in orderData:
     travelTime = (pickupServiceTime + dropoffServiceTime) / 2 + TravelTime(restaurantData[orderData[order][3]], orderData[order])
     orderData[order].append(maxClickToDoorArrivalTime - travelTime)
     orderData[order].append(maxClickToDoorArrivalTime)
+    orderData[order].append(travelTime)
 
 def CompareOneIndex(op, dictionary, key1, key2, index):
     return op(dictionary[key1][index], dictionary[key2][index])
@@ -161,52 +162,99 @@ def CompareOneIndex(op, dictionary, key1, key2, index):
 def CompareTwoIndices(op1, op2, dictionary, key1, key2, index1, index2):
     return CompareOneIndex(op1, dictionary, key1, key2, index1) and CompareOneIndex(op2, dictionary, key1, key2, index2)
 
-def RemoveDominatedSequences(sequences):
-    sequencesBySetAndLastOrder = defaultdict(list)
-    for sequence in sequences:
-        sequencesBySetAndLastOrder[(frozenset(sequence), sequence[-1])].append(sequence)
-    sequencesBySetAndLastOrder = dict(sequencesBySetAndLastOrder)
-    dominatedSequences = set()
-    for group in sequencesBySetAndLastOrder:
-        if len(sequencesBySetAndLastOrder[group]) > 1:
-            for (sequence1, sequence2) in itertools.combinations(sequencesBySetAndLastOrder[group],2):
-                if CompareTwoIndices(gt, lt, sequences, sequence1, sequence2, 2, 3):
-                    dominatedSequences.add(sequence2)
-                elif CompareTwoIndices(lt, gt, sequences, sequence1, sequence2, 2, 3):
-                    dominatedSequences.add(sequence1)
-    for sequence in dominatedSequences:
-        del sequences[sequence]
-    return sequences
+def FindAllOrderBundles():
+    """
+    Calculate & dominate order sequences
+    null -> {bundle: [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]}
+    
+    for every restaurant:
+        create a new bundle for every order at the restaurant
+        if only want single orders:
+            continue
+        create the 'empty bundle'
+        while creating new bundles:
+            for every bundle created in the last iteration:
+                for every order not in that bundle:
+                    create a new bundle
+                    if this new bundle is valid:
+                        add data to bundle dictionary
+                        dominate against bundles with the same order set and final order
+    return bundleDataDictionary
+    """
+    BundleDataDictionary = {}
+    for restaurant in restaurantData:
+        newBundles = []
+        
+        # create a new bundle for every order at the restaurant
+        for order in ordersAtRestaurant[restaurant]:
+            (earliestLeavingTime, latestLeavingTime, _, travelTime) = orderData[order][4:8]
+            newBundles.append((order,))
+            BundleDataDictionary[(order,)] = [restaurant, earliestLeavingTime, latestLeavingTime, travelTime]
+        
+        if limitBundlesToSizeOne: continue
+        
+        while len(newBundles) > 0:
+            bundlesByOrderSetAndFinalOrder = {}
+            basisBundles = newBundles
+            newBundles = []
+            for bundle in basisBundles:
+                (_, earliestLeavingTime, latestLeavingTime, travelTime) = BundleDataDictionary[bundle]
+                for order in ordersAtRestaurant[restaurant]:
+                    if order not in bundle:
+                        newBundle = bundle + (order,)
+                        newTravelTime = travelTime + TravelTime(orderData[bundle[-1]], orderData[order]) + dropoffServiceTime
+                        newLatestLeavingTime = min(latestLeavingTime, orderData[order][6] - newTravelTime)
+                        newEarliestLeavingTime = max(earliestLeavingTime, orderData[order][4])
+                        if newLatestLeavingTime >= newEarliestLeavingTime:
+                            # bundle is valid, dominate
+                            orderSet = frozenset(newBundle)
+                            lastOrder = newBundle[-1]
+                            BundleDataDictionary[newBundle] = [restaurant, newEarliestLeavingTime, newLatestLeavingTime, newTravelTime]
+                            if (orderSet, lastOrder) not in bundlesByOrderSetAndFinalOrder:
+                                newBundles.append(newBundle)
+                                bundlesByOrderSetAndFinalOrder[(orderSet, lastOrder)] = [newBundle]
+                            else:
+                                oldBundles = bundlesByOrderSetAndFinalOrder[(orderSet, lastOrder)]
+                                (dominated, dominatedBundles) = Dominate(newBundle, oldBundles, BundleDataDictionary)
+                                if dominated:
+                                    del BundleDataDictionary[newBundle]
+                                else:
+                                    bundlesByOrderSetAndFinalOrder[(orderSet, lastOrder)].append(newBundle)
+                                    newBundles.append(newBundle)
+                                    for dominatedBundle in dominatedBundles:
+                                        del BundleDataDictionary[dominatedBundle]
+                                        newBundles.remove(dominatedBundle)
+                                        bundlesByOrderSetAndFinalOrder[(orderSet, lastOrder)].remove(dominatedBundle)
+    return BundleDataDictionary
 
-# Calculate & dominate order sequences
-for restaurant in restaurantData:
-    sequenceLength = 1
-    calculatedSequences = {}
-    for order in ordersAtRestaurant[restaurant]:
-        calculatedSequences[(order,)] = [restaurant, orderData[order][4], orderData[order][5], TravelTime(restaurantData[restaurant], orderData[order]) + (pickupServiceTime + dropoffServiceTime) / 2]
-    for sequence in calculatedSequences:
-        sequenceData[sequence] = calculatedSequences[sequence]
-    if limitBundlesToSizeOne:
-        continue
-    while len(calculatedSequences) > 0:
-        sequenceLength += 1
-        newSequences = {}
-        for sequence in calculatedSequences:
-            for order in ordersAtRestaurant[restaurant]:
-                if order not in sequence:
-                    newSequence = sequence + (order,)
-                    totalTravelTime = sequenceData[sequence][3] + dropoffServiceTime + TravelTime(orderData[sequence[-1]], orderData[order])
-                    latestLeavingTime = min(sequenceData[sequence][2], orderData[order][6] - totalTravelTime)
-                    earliestLeavingTime = max(sequenceData[sequence][1], orderData[order][4])
-                    if earliestLeavingTime <= latestLeavingTime:
-                        newSequences[newSequence] = [restaurant, earliestLeavingTime, latestLeavingTime, totalTravelTime]
-        if sequenceLength >= 3:
-            newSequences = RemoveDominatedSequences(newSequences)
-        calculatedSequences = newSequences
-        for sequence in calculatedSequences:
-            sequenceData[sequence] = calculatedSequences[sequence]
-        if len(calculatedSequences) == 0:
-            break
+def Dominate(item, comparisonList, dataDictionary):
+    """
+    item can be a bundle or a bundle-restaurant pair
+    comparisonList is a list of objects of the same type as 'item' that can be compared and dominated against each other
+    dataDictionary is a dictionary, where comparisonList and item are subsets of the keys
+    
+    returns:
+        boolean, True if 'item' was dominated
+        dominatedItems, list of objects from 
+    
+    'a' dominates 'b' if:
+        'a' has a smaller travel time; and
+        'a' has a later latest leaving time
+    """
+    dominatedItems = []
+    for thing in comparisonList:
+        if dataDictionary[item][2] <= dataDictionary[thing][2] and dataDictionary[item][3] >= dataDictionary[thing][3]:
+            # 'item' is dominated, can remove it and leave function
+            # if dominated, all objects that it would dominate have already been dominated
+            # can return values
+            return (True, [])
+        elif dataDictionary[item][2] >= dataDictionary[thing][2] and dataDictionary[item][3] <= dataDictionary[thing][3]:
+            # 'item' dominates, add the dominated object to a list for later removal
+            # Note: both conditions can't be equal, case removed in previous option
+            dominatedItems.append(thing)
+    return (False, dominatedItems)
+
+sequenceData = FindAllOrderBundles()
 
 sequencesByRestaurantThenOrderSet = {}
 for sequence in sequenceData:
