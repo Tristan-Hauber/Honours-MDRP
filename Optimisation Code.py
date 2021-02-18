@@ -44,7 +44,7 @@ sequenceData = {} # orderSequence: [placementRestaurant, earliestDepartureTime, 
 sequenceNextRestaurantData = {} # (sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 untimedArcData = {} # (courierGroup, sequence, nextRestaurant): [placementRestaurant, earliestDepartureTime, latestDepartureTime, totalTravelTime]
 
-grubhubInstance = '0o50t100s1p125'
+grubhubInstance = '0o100t100s1p100'
 fileDirectory = 'MealDeliveryRoutingGithub/public_instances/' + grubhubInstance + '/'
 programStartTime = time()
 
@@ -152,7 +152,7 @@ def TravelTime(loc1, loc2):
 for order in orderData:
     maxClickToDoorArrivalTime = orderData[order][2] + maxClickToDoor
     travelTime = (pickupServiceTime + dropoffServiceTime) / 2 + TravelTime(restaurantData[orderData[order][3]], orderData[order])
-    orderData[order].append(maxClickToDoorArrivalTime - travelTime)
+    orderData[order].append(min(maxClickToDoorArrivalTime - travelTime, globalOffTime))
     orderData[order].append(maxClickToDoorArrivalTime)
     orderData[order].append(travelTime)
 
@@ -235,7 +235,7 @@ def Dominate(item, comparisonList, dataDictionary):
     
     returns:
         boolean, True if 'item' was dominated
-        dominatedItems, list of objects from 
+        dominatedItems, list of objects from which 'item' is checked against
     
     'a' dominates 'b' if:
         'a' has a smaller travel time; and
@@ -254,7 +254,35 @@ def Dominate(item, comparisonList, dataDictionary):
             dominatedItems.append(thing)
     return (False, dominatedItems)
 
+def CheckBundles(bundleDataDictionary):
+    invalidBundles = []
+    for bundle in bundleDataDictionary:
+        departureRestaurant, earliestLeavingTime, latestLeavingTime, travelTime = bundleDataDictionary[bundle]
+        if latestLeavingTime < earliestLeavingTime:
+            invalidBundles.append((1, bundle))
+        if max(orderData[order][4] for order in bundle) != earliestLeavingTime:
+            invalidBundles.append((2, bundle))
+        totalTravelTime = 0
+        location = ('r', departureRestaurant)
+        latestDepartureTime = globalOffTime
+        for order in bundle:
+            if orderData[order][3] != departureRestaurant:
+                invalidBundles.append((3, bundle))
+            if location[0] == 'r':
+                totalTravelTime += TravelTime(restaurantData[departureRestaurant], orderData[order]) + (pickupServiceTime + dropoffServiceTime) / 2
+            else:
+                totalTravelTime += TravelTime(orderData[location[1]], orderData[order]) + dropoffServiceTime
+            location = ('o', order)
+            latestArrivalTime = orderData[order][6]
+            latestDepartureTime = min(latestDepartureTime, latestArrivalTime - totalTravelTime)
+        if latestDepartureTime != latestLeavingTime:
+            invalidBundles.append((4, bundle))
+        if travelTime != totalTravelTime:
+            invalidBundles.append((5, bundle))
+    print('Invalid bundles:', invalidBundles)
+
 sequenceData = FindAllOrderBundles()
+CheckBundles(sequenceData)
 
 sequencesByRestaurantThenOrderSet = {}
 for sequence in sequenceData:
