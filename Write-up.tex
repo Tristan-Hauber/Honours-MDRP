@@ -20,13 +20,11 @@ One company within this industry is Grubhub. Grubhub is a US company that was fo
 
 \section{Literature Review}
 
-Dynamic vehicle routing problems (dVRP)
+The Meal Delivery Routing Problem (MDRP) typically falls under the category of dynamic vehicle routing problems (dVRP). However, our addition of a clairvoyant decision maker removes the dynamic nature of the problem such that it becomes a regular vehicle routing problem (VRP). Large versions of such problems have been solved using Dantzig-Wolfe decomposition, and indeed, the paper that inspired this one used delayed column generation in their solution to the problem.
 
-Dynamic delivery problems (dDP)
+Specifically, the problem being considered is an Open, Multiple Depot Vehicle Routing Problem with Pickup and Delivery, Time Windows and Multiple Trips (OMDVRPPDTWMT).
 
-Dynamic pickup-and-delivery problems (dPDP)
-
-Path fragments formulation
+We are solving this problem using a mixture of path fragments and Bender's Decomposition.
 
 \section{Problem Description}
 
@@ -178,5 +176,8 @@ Constraints (6) and (7) ensure that every arc has a predecessor and a successor.
 The sub problem would be solved, and come out with one of two options. Either the problem would come out feasible, or infeasible. If feasible, then the model represents a valid sub-network. We add an optimality cut to the objective value in the main problem, and store this sub network as a valid solution.
 
 If the sub-model comes out as infeasible, we do some further work on it to produce a cut on the main problem. First, we compute the Irreducible Infeasible Subsystem (IIS) of the sub-problem. Once this is calculated, we determine which of the constraints (4) or (5) made the problem infeasible. We then add a feasibility cut to the main problem of the form \begin{align}\sum_{u\in \text{IIS}}\sum_{a\in A^*(u)}X_a\leq|U^*(g)|-1+\sum_{u\in \text{IIS}}\sum_{v\in\Suc(u)\backslash U^*(g)}\sum_{a\in A^*(v)}X_a\end{align} where $X_a$ is the variable from the main model. Constraint (11) forces the model to bring in at least one previously unused successor if it chooses to use the set of arcs contained within the IIS. Worthy to note is that the equivalent constraint \begin{align}\sum_{u\in \text{IIS}}\sum_{a\in A^*(u)}X_a\leq|U^*(g)|-1+\sum_{u\in \text{IIS}}\sum_{v\in\Pred(u)\backslash U^*(g)}\sum_{a\in A^*(v)}X_a\end{align} where $v\in\Suc(u)\backslash U^*(g)$ is replaced by $v\in\Pred(u)\backslash U^*(g)$, could replace (11) and it would have the same effect on the solution.
+
+\section{Discussion}
+Include a discussion of why I chose to do things this way rather than the way in the paper, or another way. Also include if I think it's working, or not, and preliminary results.
 
 \end{document}
